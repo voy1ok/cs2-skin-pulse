@@ -1,0 +1,26 @@
+latest/buff163.json 200 711077
+latest_buff163.json dict 47328
+  AK-47 | Redline (Field-Tested) {"starting_at": {"price": 24.47}, "highest_order": {"price": 23.95}}
+  ★ Karambit | Doppler (Factory New) {"starting_at": {"price": 1092.73, "doppler": {"Phase 3": 1092.73, "Phase 4": 1145.13, "Ruby": 6661.19, "Phase 1": 1122.67, "Phase 2": 1525.04, "Sapphire": 3966.78, "Black Pearl": 11226.73}}, "highest_order": {"price": 1052.32, "doppler": {"Phase 3": 1052.32, "Phase 4": 1077.77, "Ruby": 5691.2, "Phase 1": 1052.32, "Phase 2": 1414.57, "Sapphire": 3704.82, "Black Pearl": 1052.32}}}
+  Souvenir AWP | Dragon Lore (Factory New) {"starting_at": {"price": 10627.97}, "highest_order": {"price": 9205.92}}
+  keys sample ['Sawed-Off | Jungle Thicket (Field-Tested)', 'StatTrak™ MP9 | Food Chain (Battle-Scarred)', 'Souvenir Glock-18 | Gold Toof (Factory New)']
+latests.json 301 374
+<html>
+<header><title>csgotrader.app prices</title></header>
+<body>
+CSGO prices from multiple price providers are collected here.
+Prices update daily.
+The latest is always available at: https://prices.csgotrader.app/latests.json
+You can check past prices (from 2019/06/30 on) at this path forma2026/09/28/prices.json 301 374
+<html>
+<header><title>csgotrader.app prices</title></header>
+<body>
+CSGO prices from multiple price providers are collected here.
+Prices update daily.
+The latest is always available at: https://prices.csgotrader.app/latests.json
+You can check past prices (from 2019/06/30 on) at this path formalatest/steam.json 200 542005
+latest_steam.json dict 34413
+  AK-47 | Redline (Field-Tested) {"last_24h": 43.56, "last_7d": 42.8, "last_30d": 43.51, "last_90d": 43.91}
+  ★ Karambit | Doppler (Factory New) {"last_24h": 1700.24, "last_7d": 1796.23, "last_30d": 1769.58, "last_90d": 1734.52}
+  Souvenir AWP | Dragon Lore (Factory New) null
+  keys sample ['Sticker | Heroic (Glitter) | Rio 2022', 'Sticker | IEM (Gold) | Rio 2022', 'Sticker | IHC Esports (Gold) | Rio 2022']
