@@ -261,6 +261,30 @@ function rank(names, curRow, oldRow, prices, filter, skinOf) {
   return out.slice(0, TOP_N);
 }
 
+function mergeBackfill(series, data) {
+  const d = series.daily;
+  const minDay = dayStr(NOW - DAILY_KEEP * DAY);
+  const need = new Set(d.days);
+  for (const arr of Object.values(data)) {
+    for (let k = 1; k < arr.length; k++) if (arr[k]) need.add(dayStr((arr[0] + k - 1) * DAY));
+  }
+  if (need.size !== d.days.length) {
+    const old = new Map(d.days.map((day, i) => [day, d.rows[i]]));
+    d.days = [...need].filter((x) => x >= minDay).sort();
+    d.rows = d.days.map((day) => old.get(day) || []);
+  }
+  const pos = new Map(d.days.map((day, i) => [day, i]));
+  for (const [h, arr] of Object.entries(data)) {
+    const j = series.idx.get(h);
+    if (j === undefined) continue;
+    for (let k = 1; k < arr.length; k++) {
+      if (!arr[k]) continue;
+      const i = pos.get(dayStr((arr[0] + k - 1) * DAY));
+      if (i !== undefined && !d.rows[i][j]) d.rows[i][j] = arr[k];
+    }
+  }
+}
+
 // ---------- main ----------
 async function main() {
   log(`mode=${RENDER ? 'render' : DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
@@ -278,6 +302,13 @@ async function main() {
   const series = readState('series', { names: [], intraday: { ts: [], rows: [] }, daily: { days: [], rows: [] } });
   let topFast = readState('top_fast', null);
   let topLong = readState('top_long', null);
+
+  // история, загруженная из Steam (scripts/backfill-history.mjs): заполняет только пустые дни
+  const bf = readState('history_backfill', null);
+  if (bf?.data) {
+    ensureNames(series, [...Object.keys(prices), ...Object.keys(bf.data)]);
+    mergeBackfill(series, bf.data);
+  }
 
   if (!DAILY && !RENDER) {
     const got = MOCK ? mockPrices(catalog, prices) : await fetchSteam(hashes, prices, cursor);
@@ -315,13 +346,14 @@ async function main() {
   }
 
   // долгий холд — раз в сутки (или если его ещё нет)
-  if ((DAILY && !RENDER) || !topLong) {
+  const bfNewer = bf?.updatedAt && (!topLong || bf.updatedAt > (topLong.bfAt || 0));
+  if ((DAILY && !RENDER) || !topLong || (!RENDER && bfNewer)) {
     const d = series.daily;
     const todayStr = dayStr(NOW);
     // берём последний ЗАКРЫТЫЙ день; если есть только сегодняшний — его
     let li = d.days.length - 1;
     if (li > 0 && d.days[li] === todayStr) li--;
-    topLong = { updatedAt: NOW, day: d.days[li] || null, windows: {} };
+    topLong = { updatedAt: NOW, bfAt: bf?.updatedAt || 0, day: d.days[li] || null, windows: {} };
     for (const [key, days] of Object.entries(LONG_WINDOWS)) {
       if (li < 1) { topLong.windows[key] = { days: 0, items: [] }; continue; }
       const target = Date.parse(d.days[li]) - days * DAY;
@@ -410,6 +442,7 @@ async function main() {
     fastUpdatedAt: topFast?.updatedAt || null,
     longUpdatedAt: topLong?.updatedAt || null,
     filters: { fast: FAST_FILTER, long: LONG_FILTER },
+    backfill: bf ? { status: bf.status, done: Object.keys(bf.data || {}).length, total: bf.total || 0, updatedAt: bf.updatedAt || null } : null,
   };
   writeOut('meta.json', meta);
   log('done', JSON.stringify({ priced, snapshots: meta.snapshots, days: meta.days }));

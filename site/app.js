@@ -130,6 +130,8 @@
     let note;
     if (kind === 'fast') note = `Пересчёт каждые 30 минут · обновлено ${ago(data?.updatedAt)}${w?.span ? ` · сравнение с ценой ${spanTxt(w.span)} назад` : ''}`;
     else note = `Пересчёт раз в сутки · обновлено ${ago(data?.updatedAt)}${w?.days ? ` · рост за ${w.days} дн (с ${w.from})` : ''}`;
+    const bf = D.meta?.backfill;
+    if (kind === 'long' && bf && bf.status !== 'done' && bf.total) note += ` · история Steam загружена для ${num(bf.done)} из ${num(bf.total)} позиций`;
     const body = w?.items?.length ? topRows(w.items, kind)
       : `<div class="empty"><b>История цен ещё накапливается</b>${kind === 'fast'
         ? 'Для этого окна нужно ещё несколько снимков цен. Сбор идёт каждые 30 минут.'
