@@ -336,7 +336,8 @@ async function main() {
   let topLong = readState('top_long', null);
 
   let buff = readState('buff', { at: 0, p: {} });
-  if (!RENDER && !MOCK && NOW - buff.at > 6 * H) {
+  // VPS может не достучаться до csgotrader — тогда цены Buff подтянет сборка сайта на GitHub
+  if (!MOCK && NOW - buff.at > 6 * H) {
     try { buff = { at: NOW, p: await fetchBuff(hashes) }; writeState('buff', buff); log(`buff: ${Object.keys(buff.p).length} prices`); }
     catch (e) { log('buff fetch failed:', e.message); }
   }
