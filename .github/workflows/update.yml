@@ -1,0 +1,80 @@
+name: Update prices & deploy
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # быстрый топ: цены Steam каждые 30 минут
+    - cron: '17 0 * * *'     # долгий холд: раз в сутки (00:17 UTC = 03:17 МСК)
+  workflow_dispatch:
+    inputs:
+      daily:
+        description: 'Суточный прогон (каталог + долгий холд)'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ['site/**', 'scripts/**', '.github/workflows/**']
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update-and-deploy
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Restore state (ветка data)
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git clone --depth 1 --branch data "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state \
+            || mkdir -p state
+          rm -rf state/.git
+
+      - name: Collect data
+        env:
+          STATE_DIR: state
+          OUT_DIR: site/data
+        run: |
+          if [ "${{ github.event.schedule }}" = "17 0 * * *" ] || [ "${{ inputs.daily }}" = "true" ]; then
+            node scripts/update.mjs --daily
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BUDGET_MIN=0.01 node scripts/update.mjs   # только пересобрать сайт, без опроса Steam
+          else
+            node scripts/update.mjs
+          fi
+
+      - name: Save state (ветка data)
+        if: always()
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          [ -n "$(ls -A state 2>/dev/null)" ] || exit 0
+          cd state
+          git init -q -b data
+          git config user.name "skin-pulse-bot"
+          git config user.email "skin-pulse-bot@users.noreply.github.com"
+          git add -A
+          git commit -qm "state $(date -u +%FT%TZ)"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

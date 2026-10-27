@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CS2 Skin Pulse — цены и рост скинов CS2</title>
+  <meta name="description" content="Все скины CS2 по оружию, коллекциям, кейсам и операциям. Цены Steam Market, быстрый топ роста каждые 30 минут и топ для долгого холда.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff8a1f'/%3E%3Cpath d='M5 19h6l3-8 4 13 3-7h6' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar__in">
+      <a class="logo" href="#/top">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8"/><path d="M5 19h6l3-8 4 13 3-7h6"/></svg>
+        <span>Skin<b>Pulse</b></span>
+      </a>
+      <nav class="nav" id="nav">
+        <a href="#/top" data-r="top">Топ</a>
+        <a href="#/catalog" data-r="catalog">Каталог</a>
+        <a href="#/collections" data-r="collections">Коллекции</a>
+        <a href="#/cases" data-r="cases">Кейсы</a>
+        <a href="#/operations" data-r="operations">Операции</a>
+      </nav>
+      <div class="status" id="status"><span class="dot"></span><span>загрузка…</span></div>
+    </div>
+  </header>
+
+  <main id="app" class="wrap"><div class="loader">Загружаем данные…</div></main>
+
+  <footer class="footer wrap">
+    <p>Цены — минимальные лоты Steam Community Market в USD. Быстрый топ пересчитывается каждые 30 минут, «Долгий холд» — раз в сутки.
+      Информация не является инвестиционной рекомендацией: цены на скины волатильны, учитывайте комиссию Steam (~15%).</p>
+    <p class="muted">Каталог скинов: ByMykel/CSGO-API. Проект не связан с Valve.</p>
+  </footer>
+  <div id="tip" class="tip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
