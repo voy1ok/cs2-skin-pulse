@@ -1,0 +1,20 @@
+name: Probe price sources
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          mkdir out && cd out
+          p() { code=$(curl -s -m 60 -A 'Mozilla/5.0' -o "$1" -w '%{http_code} %{size_download}' "$2"); echo "$1 $code" >> summary.txt; head -c 400 "$1" > "$1.head"; }
+          p buff_goods.json 'https://buff.163.com/api/market/goods?game=csgo&page_num=1&page_size=80'
+          p buff_goods_p5.json 'https://buff.163.com/api/market/goods?game=csgo&page_num=5&page_size=80'
+          p ct_buff.json 'https://prices.csgotrader.app/latest/buff163.json'
+          p ct_prices.json 'https://prices.csgotrader.app/latest/prices_v6.json'
+          rm -f buff_goods.json buff_goods_p5.json
+          for f in ct_buff.json ct_prices.json; do [ -s $f ] && python3 -c "import json,sys;d=json.load(open('$f'));k=list(d)[:3];print('$f',len(d),json.dumps({x:d[x] for x in k})[:1200])" >> summary.txt || true; rm -f $f; done
+          git init -q -b probe && git add -A && git -c user.name=bot -c user.email=bot@x commit -qm probe
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" probe
