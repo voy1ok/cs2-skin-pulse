@@ -16,6 +16,7 @@
   const FAST_TABS = [['1h', '1 час'], ['6h', '6 часов'], ['24h', '24 часа']];
   const LONG_TABS = [['30d', '30 дней'], ['7d', '7 дней'], ['90d', '90 дней']];
   const PAGE = 60;
+  let CW = 760, CH = 260; // размеры графика под ширину экрана
 
   const $app = document.getElementById('app');
   const $status = document.getElementById('status');
@@ -84,6 +85,8 @@
     const r = parseHash();
     document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.r === r.route));
     $tip.hidden = true;
+    if (r.route !== 'catalog' && ui.sheet) { ui.sheet = false; document.body.classList.remove('lock'); }
+    document.querySelectorAll('#tabbar a').forEach((a) => a.classList.toggle('on', a.dataset.r === r.route || (r.route === 'skin' && a.dataset.r === 'catalog')));
     const view = { top: viewTop, catalog: viewCatalog, collections: viewCollections, cases: viewCases, operations: viewOperations, skin: viewSkin }[r.route] || viewTop;
     view(r);
   }
@@ -111,7 +114,7 @@
       <a class="row" href="#/skin/${x.s}?v=${encodeURIComponent(x.h)}">
         <span class="row__n">${i + 2}</span>
         <img src="${esc(imgUrl(x.img, '128fx96f'))}" alt="" loading="lazy">
-        <span class="row__name"><b style="color:${x.r ? '' : ''}">${esc(x.h)}</b><small>${esc(CAT[x.c] || '')} · ${num(x.l)} лотов</small></span>
+        <span class="row__name"><b>${esc(x.h)}</b><small>${esc(CAT[x.c] || '')} · ${num(x.l)} лотов</small><small class="row__pm">${money(x.o)} → <b>${money(x.p)}</b></small></span>
         <span class="row__p">${money(x.p)}<small>было ${money(x.o)}</small></span>
         <span class="chip-ch ${chCls(x.ch)}">${chTxt(x.ch)}</span>
       </a>`).join('');
@@ -232,12 +235,13 @@
     if (q.get('rarity')) crumbs.push(['rarity', RARITY_RU[q.get('rarity')] || '']);
     const title = q.get('col') ? D.col.get(q.get('col'))?.name : q.get('crate') ? D.crate.get(q.get('crate'))?.name
       : q.get('op') ? D.op.get(q.get('op'))?.name : q.get('weapon') || (cat ? CAT[cat] : 'Все скины');
+    const nf = ['cat', 'weapon', 'rarity', 'col', 'crate', 'op', 'priced'].filter((k) => q.get(k)).length;
     const sel = (key, items, ph) => `<select class="sel" data-key="${key}"><option value="">${ph}</option>${items.map(([v, l]) => `<option value="${esc(v)}" ${q.get(key) === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
 
     $app.innerHTML = `
       <div class="cat-layout">
-        <aside class="filters">
-          <input class="search" type="search" placeholder="Поиск: AK-47, Asiimov…" value="${esc(q.get('q') || '')}" id="q">
+        <aside class="filters ${ui.sheet ? 'open' : ''}" id="filters">
+          <div class="sheet-h"><b>Фильтры</b><button class="sheet-x" id="sheet-x" aria-label="Закрыть">×</button></div>
           <div><h4>Тип оружия</h4><div class="chips">
             <button class="chip ${!cat ? 'on' : ''}" data-key="cat" data-val="">Все</button>
             ${CAT_ORDER.filter((c) => D.cat.skins.some((s) => s.c === c)).map((c) => `<button class="chip ${cat === c ? 'on' : ''}" data-key="cat" data-val="${c}">${CAT[c]}</button>`).join('')}
@@ -251,8 +255,14 @@
           <div><h4>Операция</h4>${sel('op', ops.map((o) => [o.id, `${o.name} (${o.year})`]), 'Любая операция')}</div>
           <label class="muted" style="font-size:14px;display:flex;gap:8px;align-items:center"><input type="checkbox" id="priced" ${q.get('priced') === '1' ? 'checked' : ''}> Только с ценой</label>
           <button class="reset" id="reset">Сбросить фильтры</button>
+          <button class="sheet-go" id="sheet-go">Показать ${num(list.length)} скинов</button>
         </aside>
+        <div class="sheet-bg ${ui.sheet ? 'open' : ''}" id="sheet-bg"></div>
         <section>
+          <div class="cat-tools">
+            <input class="search" type="search" placeholder="Поиск: AK-47, Asiimov…" value="${esc(q.get('q') || '')}" id="q" enterkeyhint="search">
+            <button class="filters-btn" id="filters-btn">Фильтры${nf ? ` · ${nf}` : ''}</button>
+          </div>
           <div class="cat-head">
             <h1>${esc(title)}</h1><span class="muted">${num(list.length)} скинов</span>
             ${`<select class="sel" data-key="sort">${Object.entries(SORTS).map(([k, l]) => `<option value="${k}" ${(q.get('sort') || 'price_desc') === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`}
@@ -270,9 +280,18 @@
     let t;
     const qi = document.getElementById('q');
     qi.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => setQ(q, 'q', qi.value), 300); });
-    if (q.get('q')) { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
+    if (q.get('q') && document.activeElement?.id !== 'q' && matchMedia('(hover: hover)').matches) { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
     document.getElementById('priced').addEventListener('change', (e) => setQ(q, 'priced', e.target.checked ? '1' : ''));
     document.getElementById('reset').addEventListener('click', () => { ui.shown = PAGE; go('#/catalog'); });
+    const sheet = (open) => {
+      ui.sheet = open;
+      document.getElementById('filters').classList.toggle('open', open);
+      document.getElementById('sheet-bg').classList.toggle('open', open);
+      document.body.classList.toggle('lock', open);
+    };
+    document.body.classList.toggle('lock', !!ui.sheet);
+    document.getElementById('filters-btn').addEventListener('click', () => sheet(true));
+    ['sheet-x', 'sheet-bg', 'sheet-go'].forEach((id) => document.getElementById(id).addEventListener('click', () => sheet(false)));
     const more = document.getElementById('more');
     if (more) more.addEventListener('click', () => {
       const grid = document.getElementById('grid');
@@ -354,7 +373,7 @@
           <table class="vt"><thead><tr><th>Вариант</th><th>Цена</th><th>24ч</th><th>7д</th><th>30д</th><th>Лотов</th><th></th></tr></thead><tbody>
             ${vs.map(([h, w, f, p, l, c24, c7, c30]) => `<tr data-h="${esc(h)}" class="${h === selected ? 'on' : ''}">
               <td>${f ? `<span class="${f === 1 ? 'st' : 'sv'}">${FLAG[f]}</span> ` : ''}${w >= 0 ? `<span title="${WEAR_L[w]}">${WEAR_S[w]}</span>` : 'Vanilla'}</td>
-              <td>${money(p)}</td><td class="${chCls(c24)}">${chTxt(c24)}</td><td class="${chCls(c7)}">${chTxt(c7)}</td><td class="${chCls(c30)}">${chTxt(c30)}</td>
+              <td>${money(p)}<small class="vt-m ${chCls(c24)}">${c24 == null ? '' : chTxt(c24)}</small></td><td class="${chCls(c24)}">${chTxt(c24)}</td><td class="${chCls(c7)}">${chTxt(c7)}</td><td class="${chCls(c30)}">${chTxt(c30)}</td>
               <td>${num(l)}</td><td><a href="${steamUrl(h)}" target="_blank" rel="noopener">Steam ↗</a></td></tr>`).join('')}
           </tbody></table>
           <div class="chart-box">
@@ -372,6 +391,7 @@
       document.getElementById('ch-title').textContent = selected;
       const v = hist?.v?.[selected];
       const pts = mode === 'i' ? (v?.i || []).map(([t, c]) => [t * 60000, c]) : (v?.d || []).map(([d, c]) => [Date.parse(d), c]);
+      CW = Math.max(300, Math.round(el.clientWidth || 760)); CH = CW < 500 ? 210 : 260;
       el.innerHTML = pts.length >= 2 ? chart(pts, mode) : '<div class="empty"><b>Недостаточно истории</b>Цены собираются каждые 30 минут — график появится после нескольких снимков.</div>';
       bindChart(el, pts, mode);
     };
@@ -393,7 +413,7 @@
   }
 
   function chart(pts, mode) {
-    const W = 760, Hh = 260, pl = 58, pr = 12, pt = 14, pb = 28;
+    const W = CW, Hh = CH, pl = 58, pr = 12, pt = 14, pb = 28;
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
     let y0 = Math.min(...ys), y1 = Math.max(...ys);
@@ -407,7 +427,7 @@
     const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => { const v = y0 + (y1 - y0) * f; const y = Y(v); return `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}"/><text x="${pl - 8}" y="${y + 4}" text-anchor="end">${money(Math.round(v))}</text>`; }).join('');
     const fmt = (t) => { const d = new Date(t); return mode === 'i' ? d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }); };
     const xt = [0, 0.33, 0.66, 1].map((f) => { const t = x0 + (x1 - x0) * f; return `<text x="${X(t)}" y="${Hh - 8}" text-anchor="${f === 0 ? 'start' : f === 1 ? 'end' : 'middle'}">${fmt(t)}</text>`; }).join('');
-    return `<svg class="chart" viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none">
+    return `<svg class="chart" viewBox="0 0 ${W} ${Hh}" style="height:${Hh}px">
       <defs><linearGradient id="ga" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${up ? '#2fd47a' : '#ff5468'}" stop-opacity=".28"/><stop offset="1" stop-color="${up ? '#2fd47a' : '#ff5468'}" stop-opacity="0"/></linearGradient></defs>
       <g class="grid">${grid}</g>${xt}
       <path d="${area}" fill="url(#ga)"/><path d="${line}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>
@@ -420,14 +440,15 @@
   function bindChart(el, pts, mode) {
     const svg = el.querySelector('svg'); if (!svg) return;
     const hit = svg.querySelector('#ch-hit'), cx = svg.querySelector('#cx'), cd = svg.querySelector('#cd');
-    const W = 760, pl = 58, pr = 12, Hh = 260, pt = 14, pb = 28;
+    const W = CW, pl = 58, pr = 12, Hh = CH, pt = 14, pb = 28;
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
     let y0 = Math.min(...ys), y1 = Math.max(...ys);
     const pad = (y1 - y0) * 0.12 || y1 * 0.05 || 1; y0 = Math.max(0, y0 - pad); y1 += pad;
     const X = (x) => pl + ((x - x0) / (x1 - x0 || 1)) * (W - pl - pr);
     const Y = (y) => pt + (1 - (y - y0) / (y1 - y0 || 1)) * (Hh - pt - pb);
-    hit.addEventListener('mousemove', (e) => {
+    const move = (e) => {
+      if (e.touches) { e = e.touches[0]; }
       const b = svg.getBoundingClientRect();
       const vx = ((e.clientX - b.left) / b.width) * W;
       let best = pts[0];
@@ -436,9 +457,15 @@
       cd.setAttribute('cx', X(best[0])); cd.setAttribute('cy', Y(best[1])); cd.setAttribute('opacity', 1);
       const d = new Date(best[0]);
       $tip.textContent = `${money(best[1])} · ${mode === 'i' ? d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('ru-RU')}`;
-      $tip.hidden = false; $tip.style.left = e.clientX + 12 + 'px'; $tip.style.top = e.clientY - 34 + 'px';
-    });
-    hit.addEventListener('mouseleave', () => { $tip.hidden = true; cx.setAttribute('opacity', 0); cd.setAttribute('opacity', 0); });
+      $tip.hidden = false;
+      $tip.style.left = Math.min(e.clientX + 12, innerWidth - 170) + 'px'; $tip.style.top = e.clientY - 44 + 'px';
+    };
+    const leave = () => { $tip.hidden = true; cx.setAttribute('opacity', 0); cd.setAttribute('opacity', 0); };
+    hit.addEventListener('mousemove', move);
+    hit.addEventListener('mouseleave', leave);
+    hit.addEventListener('touchstart', move, { passive: true });
+    hit.addEventListener('touchmove', move, { passive: true });
+    hit.addEventListener('touchend', () => setTimeout(leave, 1500));
   }
 
   // ---------- boot ----------
