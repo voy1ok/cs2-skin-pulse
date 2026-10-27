@@ -285,6 +285,22 @@ function mergeBackfill(series, data) {
   }
 }
 
+// курс USD→RUB (ЦБ РФ, запасной источник — open.er-api.com)
+async function getRate() {
+  const tries = [
+    ['cbr', 'https://www.cbr-xml-daily.ru/daily_json.js', (j) => j?.Valute?.USD?.Value],
+    ['er-api', 'https://open.er-api.com/v6/latest/USD', (j) => j?.rates?.RUB],
+  ];
+  for (const [src, url, pick] of tries) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      const v = Number(pick(await r.json()));
+      if (v > 10 && v < 1000) return { usdRub: Math.round(v * 10000) / 10000, src, at: Date.now() };
+    } catch (e) { log('rate', src, e.message); }
+  }
+  return null;
+}
+
 // ---------- main ----------
 async function main() {
   log(`mode=${RENDER ? 'render' : DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
@@ -425,7 +441,10 @@ async function main() {
     writeOut(`history/${s.id}.json`, { updatedAt: NOW, v });
   }
 
+  const rate = MOCK ? { usdRub: 81.5, src: 'mock', at: NOW } : (await getRate()) || cursor.rate || null;
+  if (rate && !RENDER && !DAILY) { cursor.rate = rate; writeState('cursor', cursor); }
   const meta = {
+    rate,
     updatedAt: RENDER ? (cursor.lastRun?.at || topFast?.updatedAt || NOW) : NOW,
     mode: DAILY ? 'daily' : 'fast',
     source: process.env.SOURCE || null,

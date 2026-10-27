@@ -26,7 +26,19 @@
 
   // ---------- helpers ----------
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const money = (c) => (c ? '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—');
+  // валюта: рубли по курсу ЦБ (по умолчанию) или доллары Steam
+  let CUR = 'RUB';
+  try { CUR = localStorage.getItem('cur') || 'RUB'; } catch { /* приватный режим */ }
+  const rate = () => D.meta?.rate?.usdRub || 0;
+  const money = (c) => {
+    if (!c) return '—';
+    if (CUR === 'RUB' && rate()) {
+      const r = (c / 100) * rate();
+      const d = r < 100 ? 2 : 0;
+      return r.toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }) + ' ₽';
+    }
+    return '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
   const chCls = (v) => (v == null ? 'flat' : v > 0 ? 'up' : v < 0 ? 'down' : 'flat');
   const chTxt = (v) => (v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(1) + '%');
   const num = (n) => Number(n || 0).toLocaleString('ru-RU');
@@ -69,7 +81,13 @@
   function renderStatus() {
     const m = D.meta;
     const fresh = m && Date.now() - m.updatedAt < 75 * 60000;
-    $status.innerHTML = `<span class="dot ${fresh ? '' : 'old'}"></span><span>обновлено ${esc(ago(m?.updatedAt))} · ${num(m?.priced)} цен</span>`;
+    $status.innerHTML = `<span class="dot ${fresh ? '' : 'old'}"></span><span>обновлено ${esc(ago(m?.updatedAt))} · ${num(m?.priced)} цен</span>
+      <button class="cur" id="cur" title="${rate() ? `Курс ЦБ: 1 $ = ${rate().toFixed(2)} ₽` : ''}">${CUR === 'RUB' ? '₽' : '$'}</button>`;
+    document.getElementById('cur').onclick = () => {
+      CUR = CUR === 'RUB' ? 'USD' : 'RUB';
+      try { localStorage.setItem('cur', CUR); } catch { /* ignore */ }
+      renderStatus(); render();
+    };
   }
 
   // ---------- router ----------
@@ -415,7 +433,7 @@
   }
 
   function chart(pts, mode) {
-    const W = CW, Hh = CH, pl = 58, pr = 12, pt = 14, pb = 28;
+    const W = CW, Hh = CH, pl = 72, pr = 12, pt = 14, pb = 28;
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
     let y0 = Math.min(...ys), y1 = Math.max(...ys);
@@ -442,7 +460,7 @@
   function bindChart(el, pts, mode) {
     const svg = el.querySelector('svg'); if (!svg) return;
     const hit = svg.querySelector('#ch-hit'), cx = svg.querySelector('#cx'), cd = svg.querySelector('#cd');
-    const W = CW, pl = 58, pr = 12, Hh = CH, pt = 14, pb = 28;
+    const W = CW, pl = 72, pr = 12, Hh = CH, pt = 14, pb = 28;
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
     let y0 = Math.min(...ys), y1 = Math.max(...ys);
