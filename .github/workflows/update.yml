@@ -1,35 +1,29 @@
-name: Update prices & deploy
+name: Deploy site
+
+# Цены собирает VPS (scripts/vps-run.sh): он кладёт состояние в ветку `data`
+# и вызывает этот workflow через repository_dispatch. Здесь только сборка и публикация сайта.
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'   # быстрый топ: цены Steam каждые 30 минут
-    - cron: '17 0 * * *'     # долгий холд: раз в сутки (00:17 UTC = 03:17 МСК)
+  repository_dispatch:
+    types: [state-updated]
   workflow_dispatch:
-    inputs:
-      daily:
-        description: 'Суточный прогон (каталог + долгий холд)'
-        type: boolean
-        default: false
-      budget:
-        description: 'Минут на опрос Steam'
-        default: '22'
   push:
     branches: [main]
-    paths: ['site/**', 'scripts/**', '.github/workflows/**']
+    paths: ['site/**', 'scripts/update.mjs', '.github/workflows/**']
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
 concurrency:
-  group: update-and-deploy
-  cancel-in-progress: false
+  group: deploy
+  cancel-in-progress: true
 
 jobs:
-  update:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -41,40 +35,14 @@ jobs:
           node-version: 22
 
       - name: Restore state (ветка data)
-        env:
-          TOKEN: ${{ github.token }}
         run: |
-          git clone --depth 1 --branch data "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state \
-            || mkdir -p state
-          rm -rf state/.git
+          git clone --depth 1 --branch data "https://github.com/${GITHUB_REPOSITORY}.git" state || mkdir -p state
 
-      - name: Collect data
+      - name: Build site data
         env:
           STATE_DIR: state
           OUT_DIR: site/data
-          BUDGET_MIN: ${{ inputs.budget || '22' }}
-        run: |
-          if [ "${{ github.event.schedule }}" = "17 0 * * *" ] || [ "${{ inputs.daily }}" = "true" ]; then
-            node scripts/update.mjs --daily
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            BUDGET_MIN=0.01 node scripts/update.mjs   # только пересобрать сайт, без опроса Steam
-          else
-            node scripts/update.mjs
-          fi
-
-      - name: Save state (ветка data)
-        if: always()
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          [ -n "$(ls -A state 2>/dev/null)" ] || exit 0
-          cd state
-          git init -q -b data
-          git config user.name "skin-pulse-bot"
-          git config user.email "skin-pulse-bot@users.noreply.github.com"
-          git add -A
-          git commit -qm "state $(date -u +%FT%TZ)"
-          git push -qf "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+        run: node scripts/update.mjs --render
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

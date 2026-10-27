@@ -10,17 +10,27 @@
 ## Как это работает
 
 ```
-GitHub Actions (cron */30) ──► scripts/update.mjs ──► Steam Market (search/render, USD)
-        │                             │
-        │                     ветка `data` — состояние: цены, история (30 ч по 30 мин + до 400 дней)
-        ▼
-GitHub Pages ◄── site/ (HTML/CSS/JS) + site/data/*.json
+VPS (cron */30) ──► scripts/vps-run.sh ──► update.mjs ──► Steam Market (search/render, USD)
+        │
+        ├─► ветка `data` — состояние: цены, история (30 ч по 30 мин + до 400 дней)
+        └─► repository_dispatch ──► GitHub Actions ──► GitHub Pages (site/ + data/*.json)
 ```
 
 - Каталог скинов: [ByMykel/CSGO-API](https://github.com/ByMykel/CSGO-API), обновляется раз в сутки.
 - Цены: минимальный лот на Steam Market (`sell_price`) и число лотов на продаже.
 - Чтобы топы не забивал шум неликвида, в рейтинг попадают только позиции с ценой от $0.20 (быстрый) / $1 (холд) и минимум 5 лотами.
 - Привязка коллекций к операциям — в `scripts/operations.json`, её можно править руками.
+
+## Установка сборщика на VPS
+
+Steam блокирует серверы GitHub Actions (HTTP 429), поэтому цены собирает свой VPS.
+Нужен fine-grained токен GitHub с доступом к этому репозиторию: Contents → Read and write.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/voy1ok/cs2-skin-pulse/main/scripts/vps-setup.sh | bash
+```
+
+Лог: `tail -f /var/log/skinpulse.log`. Расписание: `/etc/cron.d/skinpulse`.
 
 ## Запуск локально
 

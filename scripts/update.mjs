@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const ARGS = new Set(process.argv.slice(2));
 const DAILY = ARGS.has('--daily');
+const RENDER = ARGS.has('--render'); // только собрать сайт из готового состояния, ничего не опрашивать и не сохранять
 const STATE = process.env.STATE_DIR || 'state';
 const OUT = process.env.OUT_DIR || 'site/data';
 const MOCK = process.env.MOCK === '1';
@@ -64,6 +65,7 @@ function readState(name, def) {
   try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(f))); } catch (e) { log('state broken', name, e.message); return def; }
 }
 function writeState(name, data) {
+  if (RENDER) return;
   fs.mkdirSync(STATE, { recursive: true });
   fs.writeFileSync(path.join(STATE, `${name}.json.gz`), zlib.gzipSync(JSON.stringify(data), { level: 9 }));
 }
@@ -260,9 +262,9 @@ function rank(names, curRow, oldRow, prices, filter, skinOf) {
 
 // ---------- main ----------
 async function main() {
-  log(`mode=${DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
+  log(`mode=${RENDER ? 'render' : DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
   let catalog = readState('catalog', null);
-  if (!catalog || DAILY || NOW - catalog.builtAt > 3 * DAY) {
+  if (!catalog || (!RENDER && (DAILY || NOW - catalog.builtAt > 3 * DAY))) {
     try { catalog = await buildCatalog(); writeState('catalog', catalog); }
     catch (e) { if (!catalog) throw e; log('catalog refresh failed, using cached:', e.message); }
   }
@@ -276,7 +278,7 @@ async function main() {
   let topFast = readState('top_fast', null);
   let topLong = readState('top_long', null);
 
-  if (!DAILY) {
+  if (!DAILY && !RENDER) {
     const got = MOCK ? mockPrices(catalog, prices) : await fetchSteam(hashes, prices, cursor);
     ensureNames(series, Object.keys(prices));
     if (got > 0) {
@@ -312,7 +314,7 @@ async function main() {
   }
 
   // долгий холд — раз в сутки (или если его ещё нет)
-  if (DAILY || !topLong) {
+  if ((DAILY && !RENDER) || !topLong) {
     const d = series.daily;
     const todayStr = dayStr(NOW);
     // берём последний ЗАКРЫТЫЙ день; если есть только сегодняшний — его
@@ -391,8 +393,9 @@ async function main() {
   }
 
   const meta = {
-    updatedAt: NOW,
+    updatedAt: RENDER ? (cursor.lastRun?.at || topFast?.updatedAt || NOW) : NOW,
     mode: DAILY ? 'daily' : 'fast',
+    source: process.env.SOURCE || null,
     mock: MOCK,
     skins: catalog.skins.length,
     items: hashes.size,
