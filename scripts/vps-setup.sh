@@ -17,7 +17,8 @@ fi
 echo "== 2/6 Ставлю git и Node.js"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq git curl ca-certificates nodejs >/dev/null
+apt-get install -y -qq git curl ca-certificates nodejs cron >/dev/null
+systemctl enable --now cron >/dev/null 2>&1 || true
 echo "   node $(node -v)"
 
 echo "== 3/6 Файл подкачки (у сервера мало памяти)"
