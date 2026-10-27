@@ -10,6 +10,9 @@ on:
         description: 'Суточный прогон (каталог + долгий холд)'
         type: boolean
         default: false
+      budget:
+        description: 'Минут на опрос Steam'
+        default: '22'
   push:
     branches: [main]
     paths: ['site/**', 'scripts/**', '.github/workflows/**']
@@ -49,6 +52,7 @@ jobs:
         env:
           STATE_DIR: state
           OUT_DIR: site/data
+          BUDGET_MIN: ${{ inputs.budget || '22' }}
         run: |
           if [ "${{ github.event.schedule }}" = "17 0 * * *" ] || [ "${{ inputs.daily }}" = "true" ]; then
             node scripts/update.mjs --daily

@@ -167,12 +167,16 @@ async function fetchSteam(hashes, prices, cursor) {
           Referer: 'https://steamcommunity.com/market/search?appid=730',
         },
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        throw new Error(`HTTP ${r.status} ${body.replace(/\s+/g, ' ').slice(0, 160)}`);
+      }
       data = await r.json();
       if (!data?.success) throw new Error('success=false');
       if (!data.results?.length && start < (data.total_count || 0)) throw new Error('empty page (soft rate limit)');
     } catch (e) {
       fails++;
+      cursor.errors = [...(cursor.errors || []), { at: Date.now(), start, msg: String(e.message).slice(0, 220) }].slice(-10);
       const wait = Math.min(240_000, 30_000 * 2 ** (fails - 1));
       log(`steam start=${start}: ${e.message}; retry in ${wait / 1000}s`);
       if (fails > 6 || Date.now() - T0 + wait > BUDGET) break;
