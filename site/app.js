@@ -81,7 +81,7 @@
   function renderStatus() {
     const m = D.meta;
     const fresh = m && Date.now() - m.updatedAt < 75 * 60000;
-    $status.innerHTML = `<span class="dot ${fresh ? '' : 'old'}"></span><span>обновлено ${esc(ago(m?.updatedAt))} · ${num(m?.priced)} цен</span>
+    $status.innerHTML = `<span class="dot ${fresh ? '' : 'old'}"></span><span>обновлено ${esc(ago(m?.updatedAt))} · ${num((m?.priced || 0) + (m?.buffPriced || 0))} цен</span>
       <button class="cur" id="cur" title="${rate() ? `Курс ЦБ: 1 $ = ${rate().toFixed(2)} ₽` : ''}">${CUR === 'RUB' ? '₽' : '$'}</button>`;
     document.getElementById('cur').onclick = () => {
       CUR = CUR === 'RUB' ? 'USD' : 'RUB';
@@ -176,7 +176,7 @@
         </div>
         <div class="stats">
           <div class="stat"><b>${num(m.skins)}</b><span>скинов в базе</span></div>
-          <div class="stat"><b>${num(m.priced)}</b><span>цен со Steam</span></div>
+          <div class="stat"><b>${num(m.priced)}</b><span>цен Steam${m.buffPriced ? ` + ${num(m.buffPriced)} Buff` : ''}</span></div>
           <div class="stat"><b class="${best24 ? 'up' : ''}">${best24 ? chTxt(best24.ch) : '—'}</b><span>лидер роста за 24ч</span></div>
         </div>
       </section>
@@ -234,7 +234,7 @@
       <span class="card__w">${s.star ? '★ ' : ''}${esc(s.w)}</span>
       <img src="${esc(imgUrl(s.img, '256fx192f'))}" alt="" loading="lazy">
       <span class="card__n">${esc(s.n.split(' | ')[1] || s.n)}</span>
-      <span class="card__f"><b>${s.p ? 'от ' + money(s.p) : '—'}</b><small class="${chCls(ch)}">${ch == null ? '' : chTxt(ch)}</small></span>
+      <span class="card__f"><b>${s.p ? 'от ' + money(s.p) : '—'}${s.pb ? '<i class="buff" title="Нет лотов в Steam — цена с Buff163">Buff</i>' : ''}</b><small class="${chCls(ch)}">${ch == null ? '' : chTxt(ch)}</small></span>
     </a>`;
   }
 
@@ -391,9 +391,9 @@
           <h1>${s.star ? '★ ' : ''}${esc(s.n)}</h1>
           <div class="tags">${links.join('')}${fl}</div>
           <table class="vt"><thead><tr><th>Вариант</th><th>Цена</th><th>24ч</th><th>7д</th><th>30д</th><th>Лотов</th><th></th></tr></thead><tbody>
-            ${vs.map(([h, w, f, p, l, c24, c7, c30]) => `<tr data-h="${esc(h)}" class="${h === selected ? 'on' : ''}">
+            ${vs.map(([h, w, f, p, l, c24, c7, c30, src]) => `<tr data-h="${esc(h)}" class="${h === selected ? 'on' : ''}">
               <td>${f ? `<span class="${f === 1 ? 'st' : 'sv'}">${FLAG[f]}</span> ` : ''}${w >= 0 ? `<span title="${WEAR_L[w]}">${WEAR_S[w]}</span>` : 'Vanilla'}</td>
-              <td>${money(p)}<small class="vt-m ${chCls(c24)}">${c24 == null ? '' : chTxt(c24)}</small></td><td class="${chCls(c24)}">${chTxt(c24)}</td><td class="${chCls(c7)}">${chTxt(c7)}</td><td class="${chCls(c30)}">${chTxt(c30)}</td>
+              <td>${money(p)}${src === 'b' ? '<i class="buff" title="Нет лотов в Steam — цена с Buff163">Buff</i>' : ''}<small class="vt-m ${chCls(c24)}">${c24 == null ? '' : chTxt(c24)}</small></td><td class="${chCls(c24)}">${chTxt(c24)}</td><td class="${chCls(c7)}">${chTxt(c7)}</td><td class="${chCls(c30)}">${chTxt(c30)}</td>
               <td>${num(l)}</td><td><a href="${steamUrl(h)}" target="_blank" rel="noopener">Steam ↗</a></td></tr>`).join('')}
           </tbody></table>
           <div class="chart-box">

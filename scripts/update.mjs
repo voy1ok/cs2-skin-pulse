@@ -301,6 +301,22 @@ async function getRate() {
   return null;
 }
 
+// цены Buff163 (через csgotrader.app, обновляются раз в сутки) — запасной источник
+// для скинов, у которых нет лотов в Steam. В топы и проценты не попадают.
+async function fetchBuff(hashes) {
+  const r = await fetch('https://prices.csgotrader.app/latest/buff163.json', { signal: AbortSignal.timeout(120_000) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  let buf = Buffer.from(await r.arrayBuffer());
+  if (buf[0] === 0x1f && buf[1] === 0x8b) buf = zlib.gunzipSync(buf);
+  const j = JSON.parse(buf);
+  const p = {};
+  for (const [h, x] of Object.entries(j)) {
+    const usd = Number(x?.starting_at?.price);
+    if (hashes.has(h) && usd > 0) p[h] = Math.round(usd * 100);
+  }
+  return p;
+}
+
 // ---------- main ----------
 async function main() {
   log(`mode=${RENDER ? 'render' : DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
@@ -318,6 +334,12 @@ async function main() {
   const series = readState('series', { names: [], intraday: { ts: [], rows: [] }, daily: { days: [], rows: [] } });
   let topFast = readState('top_fast', null);
   let topLong = readState('top_long', null);
+
+  let buff = readState('buff', { at: 0, p: {} });
+  if (!RENDER && !MOCK && NOW - buff.at > 6 * H) {
+    try { buff = { at: NOW, p: await fetchBuff(hashes) }; writeState('buff', buff); log(`buff: ${Object.keys(buff.p).length} prices`); }
+    catch (e) { log('buff fetch failed:', e.message); }
+  }
 
   // история, загруженная из Steam (scripts/backfill-history.mjs): заполняет только пустые дни
   const bf = readState('history_backfill', null);
@@ -397,21 +419,28 @@ async function main() {
     return o ? pct(curVal, o) : null;
   };
 
-  let priced = 0;
+  let priced = 0, buffPriced = 0;
   const skinsOut = catalog.skins.map((s) => {
     let best = null;
     const v = s.v.map(([h, w, f]) => {
       const p = prices[h];
-      const cur = p && p[0] > 0 ? p[0] : 0;
-      if (cur) priced++;
-      const ch24 = change(h, it.rows, i24, iLast, cur);
-      const ch7 = change(h, d.rows, d7, d.rows.length - 1, cur);
-      const ch30 = change(h, d.rows, d30, d.rows.length - 1, cur);
-      const row = [h, w, f, cur, p ? p[1] : 0, ch24, ch7, ch30];
-      if (cur && (!best || (f === 0 && best[2] !== 0) || (f === best[2] && cur < best[3]))) best = row;
+      const steam = p && p[0] > 0 ? p[0] : 0;
+      if (steam) priced++;
+      // нет лотов в Steam → цена Buff163 (последнее поле 'b'), без процентов
+      if (!steam && buff.p[h]) {
+        buffPriced++;
+        const row = [h, w, f, buff.p[h], 0, null, null, null, 'b'];
+        if (!best || (best[8] === 'b' && ((f === 0 && best[2] !== 0) || (f === best[2] && buff.p[h] < best[3])))) best = row;
+        return row;
+      }
+      const ch24 = change(h, it.rows, i24, iLast, steam);
+      const ch7 = change(h, d.rows, d7, d.rows.length - 1, steam);
+      const ch30 = change(h, d.rows, d30, d.rows.length - 1, steam);
+      const row = [h, w, f, steam, p ? p[1] : 0, ch24, ch7, ch30];
+      if (steam && (!best || best[8] === 'b' || (f === 0 && best[2] !== 0) || (f === best[2] && steam < best[3]))) best = row;
       return row;
     });
-    return { ...s, v, p: best ? best[3] : 0, ch24: best ? best[5] : null, ch7: best ? best[6] : null, ch30: best ? best[7] : null };
+    return { ...s, v, p: best ? best[3] : 0, pb: best?.[8] === 'b' ? 1 : 0, ch24: best ? best[5] : null, ch7: best ? best[6] : null, ch30: best ? best[7] : null };
   });
 
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -452,6 +481,8 @@ async function main() {
     skins: catalog.skins.length,
     items: hashes.size,
     priced,
+    buffPriced,
+    buffAt: buff.at || null,
     snapshots: it.ts.length,
     firstSnapshot: it.ts[0] || null,
     days: d.days.length,
