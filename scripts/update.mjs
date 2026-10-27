@@ -35,7 +35,7 @@ const H = 3_600_000;
 const DAY = 24 * H;
 const INTRADAY_KEEP = 30 * H;
 const DAILY_KEEP = 400;
-const STALE = 3 * H;
+const STALE = 4 * H; // полный обход ~16 тыс. позиций по 10 штук занимает 1–2 часа
 
 const FAST_WINDOWS = { '1h': 1 * H, '6h': 6 * H, '24h': 24 * H };
 const LONG_WINDOWS = { '7d': 7, '30d': 30, '90d': 90 };
@@ -193,13 +193,14 @@ async function fetchSteam(hashes, prices, cursor) {
       got++;
     }
     cursor.total = data.total_count;
-    start += 100;
+    cursor.pageSize = data.results.length;
+    start += data.results.length; // Steam отдаёт без логина только 10 позиций за запрос
     if (start >= data.total_count) {
       start = 0; passDone = true;
       cursor.fullPassAt = now;
       cursor.passes = (cursor.passes || 0) + 1;
     }
-    if (pages % 20 === 0) log(`steam: ${pages} pages, start=${start}/${cursor.total}`);
+    if (pages % 100 === 0) log(`steam: ${pages} pages, start=${start}/${cursor.total}`);
     await sleep(DELAY);
   }
   cursor.start = start;
