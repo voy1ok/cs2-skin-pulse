@@ -3,15 +3,15 @@
 Сайт со всеми скинами CS2, ценами Steam Community Market и топом растущих предметов CS2.
 
 - **Каталог** — все скины оружия, ножей и перчаток с группировкой по типу оружия, конкретному оружию, редкости, **коллекциям**, **кейсам** и **операциям**.
-- **⚡ Быстрый топ** — предметы, быстрее всего растущие в цене за 1 / 6 / 24 часа: оружие, ножи, перчатки, наклейки, агенты, кейсы, граффити, музыкальные наборы, нашивки, брелоки — всё, что продаётся в CS2. Пересчитывается **каждые 30 минут**.
+- **⚡ Быстрый топ** — предметы, быстрее всего растущие в цене за 1 / 6 / 24 часа: оружие, ножи, перчатки, наклейки, агенты, кейсы, граффити, музыкальные наборы, нашивки, брелоки — всё, что продаётся в CS2. Пересчитывается **каждые 5 минут** — чаще нельзя: Skinport кэширует ответ на 5 минут. Страница сама подхватывает новый топ (проверка каждые 20 секунд).
 - **📈 Долгий холд** — предметы с наибольшим ростом за 30 / 7 / 90 дней. Пересчитывается **раз в сутки**.
 - Страница скина — цены всех вариантов (износ, StatTrak™, Souvenir), изменение за 24ч/7д/30д, график и ссылка на Steam.
 
 ## Как это работает
 
 ```
-VPS (cron */30) ──► scripts/vps-run.sh ──► update.mjs ──► Skinport API (все предметы, для топов)
-                                                       └─► Steam Market (search/render, USD, для каталога)
+VPS (cron */5)  ──► vps-run.sh --market ──► update.mjs --market ──► Skinport API (все предметы, быстрый топ)
+VPS (cron */30) ──► vps-run.sh          ──► update.mjs          ──► Steam Market (search/render, USD, каталог)
         │
         ├─► ветка `data` — состояние: цены, история (30 ч по 30 мин + до 400 дней)
         └─► repository_dispatch ──► GitHub Actions ──► GitHub Pages (site/ + data/*.json)
@@ -33,13 +33,15 @@ Steam блокирует серверы GitHub Actions (HTTP 429), поэтом�
 curl -fsSL https://raw.githubusercontent.com/voy1ok/cs2-skin-pulse/main/scripts/vps-setup.sh | bash
 ```
 
-Лог: `tail -f /var/log/skinpulse.log`. Расписание: `/etc/cron.d/skinpulse`.
+Лог: `tail -f /var/log/skinpulse.log`. Расписание — `scripts/skinpulse.cron`, `vps-run.sh` сам копирует его в `/etc/cron.d/skinpulse`.
 
 ## Запуск локально
 
 ```bash
 node scripts/update.mjs --daily     # собрать каталог
-node scripts/update.mjs             # опросить Steam и посчитать быстрый топ
+node scripts/update.mjs --market    # снимок цен Skinport и быстрый топ
+node scripts/update.mjs             # опросить Steam (цены каталога)
+node scripts/update.mjs --render    # собрать данные сайта в site/data
 npx serve site                      # открыть сайт
 ```
 

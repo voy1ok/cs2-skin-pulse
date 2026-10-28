@@ -44,16 +44,11 @@ echo "== 5/6 Скачиваю код и ставлю расписание"
 mkdir -p "$BASE"
 if [ -d "$BASE/app/.git" ]; then git -C "$BASE/app" pull -q; else git clone -q "https://github.com/$REPO.git" "$BASE/app"; fi
 chmod +x "$BASE/app/scripts/vps-run.sh"
-cat > /etc/cron.d/skinpulse <<EOF
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-*/30 * * * * root flock -n /run/skinpulse.lock $BASE/app/scripts/vps-run.sh >> /var/log/skinpulse.log 2>&1
-17 0 * * *   root flock -w 1800 /run/skinpulse.lock $BASE/app/scripts/vps-run.sh --daily >> /var/log/skinpulse.log 2>&1
-EOF
-chmod 644 /etc/cron.d/skinpulse
+install -m 644 "$BASE/app/scripts/skinpulse.cron" /etc/cron.d/skinpulse
 
 echo "== 6/6 Первый сбор цен запущен в фоне (10–20 минут)"
+nohup flock /run/skinpulse-market.lock "$BASE/app/scripts/vps-run.sh" --market >> /var/log/skinpulse.log 2>&1 &
 nohup flock /run/skinpulse.lock "$BASE/app/scripts/vps-run.sh" >> /var/log/skinpulse.log 2>&1 &
 echo
-echo "Готово! Окно можно закрывать. Дальше цены собираются сами каждые 30 минут."
+echo "Готово! Окно можно закрывать. Дальше топы обновляются сами каждые 5 минут, цены Steam — каждые 30."
 echo "Лог: tail -f /var/log/skinpulse.log"

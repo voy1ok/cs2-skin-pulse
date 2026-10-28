@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // CS2 Skin Pulse — сбор каталога скинов, цен Steam Market и расчёт топов.
 //
-//   node scripts/update.mjs           — быстрый прогон (каждые 30 мин): цены Steam и Skinport + быстрый топ
+//   node scripts/update.mjs --market  — рынок (каждые 5 мин): цены Skinport + быстрый топ
+//   node scripts/update.mjs           — прогон Steam (каждые 30 мин): цены скинов для каталога
 //   node scripts/update.mjs --daily   — суточный прогон: обновить каталог + топ «долгий холд»
+//   node scripts/update.mjs --render  — собрать сайт из готового состояния
 //
 // Топы на главной считаются по Skinport: он одним запросом отдаёт все предметы CS2
 // (оружие, наклейки, агенты, кейсы, граффити…), а Steam за 30 минут успевает только часть скинов.
+// Чаще 5 минут опрашивать незачем: Skinport кэширует ответ на 5 минут (и пускает 8 запросов за 5 минут).
 //
 // Переменные окружения:
 //   STATE_DIR   папка с состоянием между прогонами (по умолчанию ./state)
@@ -24,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 const ARGS = new Set(process.argv.slice(2));
 const DAILY = ARGS.has('--daily');
 const RENDER = ARGS.has('--render'); // только собрать сайт из готового состояния, ничего не опрашивать и не сохранять
+const MARKET = ARGS.has('--market'); // только Skinport и быстрый топ, сайт не собирается
 const STATE = process.env.STATE_DIR || 'state';
 const OUT = process.env.OUT_DIR || 'site/data';
 const MOCK = process.env.MOCK === '1';
@@ -37,6 +41,7 @@ const API = 'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/
 const H = 3_600_000;
 const DAY = 24 * H;
 const INTRADAY_KEEP = 30 * H;
+const FINE_KEEP = 2 * H; // снимки чаще чем раз в 30 мин храним только за последние 2 часа
 const DAILY_KEEP = 400;
 const STALE = 4 * H; // полный обход ~16 тыс. позиций по 10 штук занимает 1–2 часа
 const MARKET_STALE = 2 * H;
@@ -73,7 +78,10 @@ function readState(name, def) {
 function writeState(name, data) {
   if (RENDER) return;
   fs.mkdirSync(STATE, { recursive: true });
-  fs.writeFileSync(path.join(STATE, `${name}.json.gz`), zlib.gzipSync(JSON.stringify(data), { level: 9 }));
+  // через временный файл: прогоны рынка и Steam идут параллельно и не должны читать недописанное
+  const f = path.join(STATE, `${name}.json.gz`);
+  fs.writeFileSync(`${f}.${process.pid}.tmp`, zlib.gzipSync(JSON.stringify(data), { level: 9 }));
+  fs.renameSync(`${f}.${process.pid}.tmp`, f);
 }
 function writeOut(rel, data) {
   const f = path.join(OUT, rel);
@@ -292,12 +300,15 @@ function ensureNames(state, hashes) {
 function snapshotRow(names, prices, stale = STALE) {
   return names.map((h) => { const p = prices[h]; return p && p[0] > 0 && NOW - p[2] < stale ? p[0] : 0; });
 }
-// добавить снимок цен в историю: внутри дня по 30 мин, плюс последняя цена каждого дня
+// добавить снимок цен в историю: последние 2 часа — каждый снимок, дальше по одному на 30 мин,
+// плюс последняя цена каждого дня
 function pushSnapshot(series, row, keepDays) {
   const it = series.intraday;
-  if (it.ts.length && NOW - it.ts[it.ts.length - 1] < 10 * 60_000) { it.ts.pop(); it.rows.pop(); }
+  if (it.ts.length && NOW - it.ts[it.ts.length - 1] < 3 * 60_000) { it.ts.pop(); it.rows.pop(); }
   it.ts.push(NOW); it.rows.push(row);
-  while (it.ts.length && it.ts[0] < NOW - INTRADAY_KEEP) { it.ts.shift(); it.rows.shift(); }
+  const slot = (t) => Math.floor(t / (30 * 60_000));
+  const keep = it.ts.map((t, i) => t >= NOW - INTRADAY_KEEP && (NOW - t < FINE_KEEP || i === 0 || slot(t) !== slot(it.ts[i - 1])));
+  it.ts = it.ts.filter((_, i) => keep[i]); it.rows = it.rows.filter((_, i) => keep[i]);
 
   const d = series.daily, today = dayStr(NOW);
   if (d.days[d.days.length - 1] !== today) { d.days.push(today); d.rows.push([]); }
@@ -338,7 +349,7 @@ function topFastOf(series, prices, filter) {
   const cur = it.rows[last - 1];
   const top = { updatedAt: NOW, src: 'skinport', windows: {} };
   for (const [key, win] of Object.entries(FAST_WINDOWS)) {
-    const idx = last >= 2 ? pastIndex(it.ts.slice(0, -1), NOW - win, win * 0.5, 10 * 60_000) : -1;
+    const idx = last >= 2 ? pastIndex(it.ts.slice(0, -1), NOW - win, win * 0.5, 3 * 60_000) : -1;
     if (idx < 0) { top.windows[key] = { span: 0, items: [] }; continue; }
     const span = Math.round((NOW - it.ts[idx]) / 60_000);
     top.windows[key] = { span, items: rank(series.names, cur, (j) => oldValue(it.rows, idx, j, last - 1), prices, filter) };
@@ -421,8 +432,37 @@ async function fetchBuff(hashes) {
 }
 
 // ---------- main ----------
+function readMarket() {
+  const market = readState('market', {});
+  const mseries = readState('market_series', { names: [], intraday: { ts: [], rows: [] }, daily: { days: [], rows: [] } });
+  const mcursor = readState('market_cursor', {});
+  ensureNames(mseries, Object.keys(market));
+  return { market, mseries, mcursor };
+}
+
+// прогон рынка: снимок цен Skinport → быстрый топ. Сайт собирает GitHub (--render).
+async function runMarket(catalog) {
+  const { market, mseries, mcursor } = readMarket();
+  try {
+    if (MOCK && !catalog) throw new Error('MOCK: сначала соберите каталог (--daily)');
+    Object.assign(market, MOCK ? mockMarket(catalog, market) : await fetchSkinport());
+    mcursor.lastOk = Date.now(); mcursor.error = null;
+    ensureNames(mseries, Object.keys(market));
+    pushSnapshot(mseries, snapshotRow(mseries.names, market, MARKET_STALE), MARKET_KEEP);
+    log(`skinport: ${Object.keys(market).length} items, ${mseries.intraday.ts.length} snapshots`);
+    writeState('market', market);
+    writeState('market_series', { names: mseries.names, intraday: mseries.intraday, daily: mseries.daily });
+    writeState('top_fast', topFastOf(mseries, market, FAST_FILTER));
+  } catch (e) {
+    mcursor.error = { at: Date.now(), msg: String(e.message).slice(0, 220) };
+    log('skinport failed:', e.message);
+  }
+  writeState('market_cursor', mcursor);
+}
+
 async function main() {
-  log(`mode=${RENDER ? 'render' : DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
+  log(`mode=${RENDER ? 'render' : MARKET ? 'market' : DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
+  if (MARKET) return runMarket(MOCK ? readState('catalog', null) : null); // каталог нужен только для mock
   let catalog = readState('catalog', null);
   if (!catalog || (!RENDER && (DAILY || NOW - catalog.builtAt > 3 * DAY || !catalog.extras))) {
     try { catalog = await buildCatalog(); writeState('catalog', catalog); }
@@ -452,30 +492,10 @@ async function main() {
     mergeBackfill(series, bf.data);
   }
 
-  // рынок Skinport — все предметы CS2, по нему считаются оба топа
-  const market = readState('market', {});
-  const mseries = readState('market_series', { names: [], intraday: { ts: [], rows: [] }, daily: { days: [], rows: [] } });
-  const mcursor = readState('market_cursor', {});
-  ensureNames(mseries, Object.keys(market));
+  // рынок Skinport (собирает прогон --market) — все предметы CS2, по нему считаются оба топа
+  const { market, mseries, mcursor } = readMarket();
 
   if (!DAILY && !RENDER) {
-    try {
-      Object.assign(market, MOCK ? mockMarket(catalog, market) : await fetchSkinport());
-      mcursor.lastOk = Date.now(); mcursor.error = null;
-      ensureNames(mseries, Object.keys(market));
-      pushSnapshot(mseries, snapshotRow(mseries.names, market, MARKET_STALE), MARKET_KEEP);
-      log(`skinport: ${Object.keys(market).length} items`);
-      writeState('market', market);
-      writeState('market_series', { names: mseries.names, intraday: mseries.intraday, daily: mseries.daily });
-    } catch (e) {
-      mcursor.error = { at: Date.now(), msg: String(e.message).slice(0, 220) };
-      log('skinport failed:', e.message);
-    }
-    writeState('market_cursor', mcursor);
-    topFast = topFastOf(mseries, market, FAST_FILTER);
-    writeState('top_fast', topFast);
-
-    // Steam — после Skinport: обход идёт до BUDGET_MIN минут и не должен сдвигать снимок рынка
     const got = MOCK ? mockPrices(catalog, prices) : await fetchSteam(hashes, prices, cursor);
     ensureNames(series, Object.keys(prices));
     if (got > 0) pushSnapshot(series, snapshotRow(series.names, prices), DAILY_KEEP);
@@ -570,7 +590,8 @@ async function main() {
   if (rate && !RENDER && !DAILY) { cursor.rate = rate; writeState('cursor', cursor); }
   const meta = {
     rate,
-    updatedAt: RENDER ? (cursor.lastRun?.at || topFast?.updatedAt || NOW) : NOW,
+    updatedAt: RENDER ? (Math.max(cursor.lastRun?.at || 0, topFast?.updatedAt || 0) || NOW) : NOW,
+    catalogAt: catalog.builtAt,
     mode: DAILY ? 'daily' : 'fast',
     source: process.env.SOURCE || null,
     mock: MOCK,

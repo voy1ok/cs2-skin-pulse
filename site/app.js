@@ -66,13 +66,15 @@
   };
 
   async function getJSON(url) {
-    const r = await fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Math.floor(Date.now() / 300000), { cache: 'no-cache' });
+    const r = await fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Math.floor(Date.now() / 20000), { cache: 'no-cache' });
     if (!r.ok) throw new Error(url + ' ' + r.status);
     return r.json();
   }
 
-  async function load() {
-    const [cat, fast, long, meta] = await Promise.all(['data/catalog.json', 'data/top_fast.json', 'data/top_long.json', 'data/meta.json'].map(getJSON));
+  async function load(tops = false) { // tops: обновить только топы, каталог — если он сменился
+    const [fast, long, meta] = await Promise.all(['data/top_fast.json', 'data/top_long.json', 'data/meta.json'].map(getJSON));
+    const keep = tops && D.cat && meta.catalogAt && meta.catalogAt === D.meta?.catalogAt;
+    const cat = keep ? D.cat : await getJSON('data/catalog.json');
     Object.assign(D, { cat, fast, long, meta, loadedAt: Date.now() });
     D.byId = new Map(cat.skins.map((s) => [s.id, s]));
     D.col = new Map(cat.groups.collections.map((c) => [c.id, c]));
@@ -151,18 +153,18 @@
     const w = data?.windows?.[cur];
     const f = D.meta?.filters?.[kind] || {};
     let note;
-    if (kind === 'fast') note = `Пересчёт каждые 30 минут · обновлено ${ago(data?.updatedAt)}${w?.span ? ` · сравнение с ценой ${spanTxt(w.span)} назад` : ''}`;
+    if (kind === 'fast') note = `Пересчёт каждые 5 минут · обновлено ${ago(data?.updatedAt)}${w?.span ? ` · сравнение с ценой ${spanTxt(w.span)} назад` : ''}`;
     else note = `Пересчёт раз в сутки · обновлено ${ago(data?.updatedAt)}${w?.days ? ` · рост за ${w.days} дн (с ${w.from})` : ''}`;
     const mk = D.meta?.market;
     if (data?.src === 'skinport') note += ` · все предметы CS2 по ценам Skinport (минимальный лот)${mk?.error && mk.error.at > (mk.at || 0) ? ` · Skinport не ответил ${ago(mk.error.at)}` : ''}`;
     const body = w?.items?.length ? topRows(w.items, kind)
       : `<div class="empty"><b>История цен ещё накапливается</b>${kind === 'fast'
-        ? 'Для этого окна нужно ещё несколько снимков цен. Сбор идёт каждые 30 минут.'
+        ? 'Для этого окна нужно ещё несколько снимков цен. Сбор идёт каждые 5 минут.'
         : `Топ «долгий холд» появится после нескольких суток сбора (сейчас в истории ${D.meta?.days || 0} дн). Для окна в 30 дней нужен месяц данных, до этого берётся самый ранний доступный день.`}</div>`;
     return `
       <section class="panel" id="p-${kind}">
         <div class="panel__head">
-          <h2>${kind === 'fast' ? '⚡ Быстрый топ' : '📈 Долгий холд'} <span class="badge ${kind === 'fast' ? 'live' : ''}">${kind === 'fast' ? 'live · 30 мин' : 'раз в день'}</span></h2>
+          <h2>${kind === 'fast' ? '⚡ Быстрый топ' : '📈 Долгий холд'} <span class="badge ${kind === 'fast' ? 'live' : ''}">${kind === 'fast' ? 'live · 5 мин' : 'раз в день'}</span></h2>
           <div class="tabs" data-kind="${kind}">${tabs.map(([k, l]) => `<button data-k="${k}" class="${k === cur ? 'on' : ''}">${l}</button>`).join('')}</div>
           <div class="panel__note" style="width:100%">${esc(note)}. Фильтр ликвидности: цена от ${money(f.minPrice)}, от ${f.minListings} лотов на продаже.</div>
         </div>
@@ -177,7 +179,7 @@
       <section class="hero">
         <div>
           <h1>Пульс рынка <em>скинов CS2</em></h1>
-          <p>Все скины по оружию, коллекциям, кейсам и операциям с ценами Steam. На главной — топ растущих предметов CS2 (оружие, наклейки, агенты, кейсы и всё остальное) по ценам Skinport: быстрый каждые 30 минут и для долгого холда раз в сутки.</p>
+          <p>Все скины по оружию, коллекциям, кейсам и операциям с ценами Steam. На главной — топ растущих предметов CS2 (оружие, наклейки, агенты, кейсы и всё остальное) по ценам Skinport: быстрый каждые 5 минут и для долгого холда раз в сутки.</p>
         </div>
         <div class="stats">
           <div class="stat"><b>${num(m.skins)}</b><span>скинов в базе</span></div>
@@ -501,15 +503,16 @@
     $app.innerHTML = `<div class="empty"><b>Данные ещё не собраны</b>Первый сбор цен запускается автоматически и занимает 10–20 минут. Обновите страницу чуть позже.</div>`;
     $status.innerHTML = '<span class="dot old"></span><span>нет данных</span>';
   });
-  // автообновление: раз в 5 минут проверяем свежие данные
+  // автообновление: топ пересчитывается каждые 5 минут, проверяем каждые 20 секунд
   setInterval(async () => {
+    if (document.hidden) return;
     try {
       const m = await getJSON('data/meta.json');
       if (m.updatedAt !== D.meta?.updatedAt) {
-        await load();
+        await load(true);
         const r = parseHash();
         if (r.route === 'top' || r.route === '') render();
       } else renderStatus();
     } catch { /* сеть */ }
-  }, 5 * 60000);
+  }, 20000);
 })();
