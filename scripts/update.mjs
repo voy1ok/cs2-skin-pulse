@@ -592,6 +592,7 @@ async function main() {
     rate,
     updatedAt: RENDER ? (Math.max(cursor.lastRun?.at || 0, topFast?.updatedAt || 0) || NOW) : NOW,
     catalogAt: catalog.builtAt,
+    build: process.env.BUILD || null, // версия кода сайта: открытая страница перезагрузится, если она сменилась
     mode: DAILY ? 'daily' : 'fast',
     source: process.env.SOURCE || null,
     mock: MOCK,

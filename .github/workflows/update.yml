@@ -42,7 +42,13 @@ jobs:
         env:
           STATE_DIR: state
           OUT_DIR: site/data
-        run: node scripts/update.mjs --render
+          BUILD: ${{ github.sha }}
+        run: |
+          node scripts/update.mjs --render
+          # версия в адресах файлов, чтобы браузер и приложение с главного экрана не держали старый код
+          v=${BUILD::8}
+          sed -i "s|src=\"app.js\"|src=\"app.js?v=$v\"|; s|href=\"style.css\"|href=\"style.css?v=$v\"|" site/index.html
+          grep -q "app.js?v=$v" site/index.html
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

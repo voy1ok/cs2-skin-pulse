@@ -17,6 +17,7 @@
   const FAST_TABS = [['1h', '1 час'], ['6h', '6 часов'], ['24h', '24 часа']];
   const LONG_TABS = [['30d', '30 дней'], ['7d', '7 дней'], ['90d', '90 дней']];
   const PAGE = 60;
+  const BUILD = (document.currentScript?.src.match(/[?&]v=([^&]+)/) || [])[1] || null; // проставляет сборка на GitHub
   let CW = 760, CH = 260; // размеры графика под ширину экрана
 
   const $app = document.getElementById('app');
@@ -504,15 +505,23 @@
     $status.innerHTML = '<span class="dot old"></span><span>нет данных</span>';
   });
   // автообновление: топ пересчитывается каждые 5 минут, проверяем каждые 20 секунд
-  setInterval(async () => {
+  // и сразу, когда приложение снова открыли
+  async function poll() {
     if (document.hidden) return;
     try {
       const m = await getJSON('data/meta.json');
+      // вышла новая версия сайта — перезагружаемся по новому адресу, мимо кэша
+      if (BUILD && m.build && !m.build.startsWith(BUILD) && !location.search.includes('b=' + m.build.slice(0, 8))) {
+        location.replace(location.pathname + '?b=' + m.build.slice(0, 8) + location.hash);
+        return;
+      }
       if (m.updatedAt !== D.meta?.updatedAt) {
         await load(true);
         const r = parseHash();
         if (r.route === 'top' || r.route === '') render();
       } else renderStatus();
     } catch { /* сеть */ }
-  }, 20000);
+  }
+  setInterval(poll, 20000);
+  document.addEventListener('visibilitychange', poll);
 })();
