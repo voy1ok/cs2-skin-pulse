@@ -16,6 +16,12 @@
     tm: { sell: true, cash: true, fee: { sell: 5, dep: 0, out: 0 }, note: 'комиссия продавца 5%' },
     lis: { sell: false, cash: true, fee: { sell: 0, dep: 0, out: 0 }, note: 'только покупка; цены в $ — проверьте курс на их сайте' },
     csmoney: { sell: true, cash: true, fee: { sell: 5, dep: 0, out: 0 }, note: 'комиссия продавца 5%; цены в $ из сводки за сутки, без числа лотов' },
+    // зарубежные: из России напрямую не пополнить; комиссии — по обзорам площадок, проверьте у себя
+    skinport: { sell: true, cash: true, fee: { sell: 8, dep: 0, out: 0 }, note: 'комиссия продавца 8% (6% от 1 000 €)' },
+    waxpeer: { sell: true, cash: true, fee: { sell: 6, dep: 0, out: 0 }, note: 'комиссия продавца по обзорам 2–6%' },
+    buff: { sell: true, cash: true, fee: { sell: 2.5, dep: 0, out: 0 }, note: 'комиссия продавца 2,5%; цены из сводки за сутки' },
+    csfloat: { sell: true, cash: true, fee: { sell: 2, dep: 0, out: 0 }, note: 'комиссия продавца 2%, вывод 0,5–2,5%; сводка за сутки' },
+    youpin: { sell: true, cash: true, fee: { sell: 1, dep: 0, out: 0 }, note: 'комиссия продавца около 1%; цены сводки в среднем на 7% выше реальных сделок — продажа туда по умолчанию выключена' },
   };
   const USD_SITES = ['lis', 'csmoney']; // цены в долларах — курс можно поставить свой
   const MIN_LOTS = 2;     // если на площадке меньше лотов, её цену не берём
@@ -32,6 +38,11 @@
     tm: (h) => `https://market.csgo.com/ru/?search=${enc(h)}`,
     lis: (h, s) => `https://lis-skins.com/ru/market/csgo/${s || slugify(h)}/`,
     csmoney: (h) => `https://cs.money/ru/market/buy/?search=${enc(h)}`,
+    skinport: (h, s) => `https://skinport.com/item/${s || slugify(h)}`,
+    waxpeer: (h) => `https://waxpeer.com/?game=csgo&search=${enc(h)}`,
+    buff: (h) => `https://buff.163.com/market/csgo#tab=selling&page_num=1&search=${enc(h)}`,
+    csfloat: (h) => `https://csfloat.com/search?market_hash_name=${enc(h)}`,
+    youpin: (h) => `https://www.youpin898.com/market/goods-list?listType=10&gameId=730&keyWords=${enc(h)}`,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -43,8 +54,10 @@
 
   const D = { meta: null, sources: [], items: [], images: null, rows: [], shown: PAGE, open: new Set() };
   const ui = {
-    q: '', cat: store.get('cat', 'all'), minp: store.get('minp', 10000), buyOff: new Set(store.get('buyOff', [])), sellOff: new Set(store.get('sellOff', [])), sort: store.get('sort2', 'best'),
+    q: '', cat: store.get('cat', 'all'), minp: store.get('minp', 10000), buyOff: new Set(store.get('buyOff', [])), sellOff: new Set(store.get('sellOff2', ['youpin'])), sort: store.get('sort2', 'best'),
     mins: store.get('mins', 0),
+    region: store.get('region', 'ru'), // ru — только площадки, которые можно пополнить из России; all — все
+    tier: store.get('tier', 0),        // потолок цены покупки в долларах (0 — без потолка)
     fees: Object.fromEntries(Object.entries(SITE).map(([id, s]) => [id, { ...s.fee, ...store.get('fee.' + id, {}) }])),
     // свой курс для площадок с ценами в долларах, ₽ за $ (0 — как в данных)
     rates: Object.fromEntries(USD_SITES.map((id) => [id, store.get('rate.' + id, 0)])),
@@ -104,7 +117,7 @@
 
   function evaluate(it, idx) {
     const q = it[4], p = scaled(it), ref = it[5]?.[3] || 0;
-    const ok = p.map((c, i) => (c && (!q[i] || q[i] >= MIN_LOTS) ? c : 0));
+    const ok = p.map((c, i) => (c && D.active[i] && (!q[i] || q[i] >= MIN_LOTS) ? c : 0));
     let best = null;
     const routes = [];
     ok.forEach((b, i) => {
@@ -119,7 +132,7 @@
         if (!best || r.pct > best.pct) best = r;
       });
     });
-    if (!best || best.b < ui.minp) return null;
+    if (!best || best.b < ui.minp || (ui.tier && best.b > ui.tier * 100 * usdRub())) return null;
     const sales = liquidity(it[5]);
     if (ui.mins && !(sales.day >= ui.mins)) return null;
     const vals = ok.filter(Boolean);
@@ -129,7 +142,11 @@
     return { idx, it, p, ok, best, routes, sales, score, spread: (hi - lo) / lo };
   }
 
+  const usdRub = () => D.meta?.rate?.usdRub || 80;
+  const shown = () => D.sources.filter((s) => ui.region === 'all' || s.region !== 'world');
+
   function recompute() {
+    D.active = D.sources.map((s) => ui.region === 'all' || s.region !== 'world');
     D.scale = D.sources.map((s) => (ui.rates[s.id] && s.rate ? ui.rates[s.id] / s.rate : 1));
     const q = ui.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const rows = [];
@@ -151,13 +168,13 @@
 
   // ---------- отрисовка ----------
   function renderSources() {
-    $('sources').innerHTML = D.sources.map((s) => `
-      <span class="src ${s.error ? 'src--err' : ''}" title="${esc(s.error ? 'Нет данных: ' + s.error : `${num(s.count)} предметов, ${s.via || ''}`)}">
+    $('sources').innerHTML = shown().map((s) => `
+      <span class="src ${s.error ? 'src--err' : ''} ${s.region === 'world' ? 'src--world' : ''}" title="${esc(s.error ? 'Нет данных: ' + s.error : `${num(s.count)} предметов, ${s.via || ''}`)}">
         <i></i>${esc(s.name)}<small>${s.error ? esc(s.error) : `${num(s.count)} · ${esc(ago(s.at))}`}</small>
       </span>`).join('');
     const chk = (kind, off, list) => list.map((s) => `<label class="chk"><input type="checkbox" data-${kind}="${s.id}" ${off.has(s.id) ? '' : 'checked'} ${s.error ? 'disabled' : ''}>${esc(s.name)}</label>`).join('');
-    $('routes').innerHTML = `<div><span class="routes__label">Покупать на:</span>${chk('buy', ui.buyOff, D.sources)}</div>
-      <div><span class="routes__label">Продавать на:</span>${chk('sell', ui.sellOff, D.sources.filter((s) => SITE[s.id]?.sell))}
+    $('routes').innerHTML = `<div><span class="routes__label">Покупать на:</span>${chk('buy', ui.buyOff, shown())}</div>
+      <div><span class="routes__label">Продавать на:</span>${chk('sell', ui.sellOff, shown().filter((s) => SITE[s.id]?.sell))}
       <small>Steam — деньги остаются в кошельке</small></div>`;
   }
 
@@ -171,7 +188,7 @@
   function renderFees() {
     const field = (id, k, label, on = true) => `<label class="fee ${on ? '' : 'fee--off'}">${label}
       <span><input type="number" min="0" max="50" step="0.1" inputmode="decimal" data-site="${id}" data-k="${k}" value="${ui.fees[id][k]}" ${on ? '' : 'disabled'}>%</span></label>`;
-    $('feebox').innerHTML = D.sources.map((s) => {
+    $('feebox').innerHTML = shown().map((s) => {
       const site = SITE[s.id];
       if (!site) return '';
       const rate = USD_SITES.includes(s.id) && s.rate ? `<label class="fee">курс ₽/$
@@ -205,7 +222,7 @@
     const [h, , , , q, , slugs] = r.it;
     const { p } = r;
     const b = r.best;
-    const sites = p.map((c, i) => i).filter((i) => p[i]).sort((x, y) => p[x] - p[y]).map((i) => {
+    const sites = p.map((c, i) => i).filter((i) => p[i] && D.active[i]).sort((x, y) => p[x] - p[y]).map((i) => {
       const cls = i === b.i ? 'lo' : i === b.j ? 'hi' : r.ok[i] ? '' : 'off';
       const note = r.ok[i] ? (SITE[sid(i)]?.sell ? '' : 'только покупка') : 'мало лотов, не учтена';
       return `<a class="site ${cls}" href="${esc(LINK[sid(i)](h, slugs?.[sid(i)]))}" target="_blank" rel="noopener">
@@ -242,7 +259,26 @@
   }
 
   // ---------- управление ----------
+  function renderSegs() {
+    const seg = (el, opts, val) => { el.innerHTML = opts.map(([v, t]) => `<button type="button" data-v="${v}" class="${String(v) === String(val) ? 'on' : ''}">${t}</button>`).join(''); };
+    seg($('region'), [['ru', 'Только РФ'], ['all', 'Все площадки']], ui.region);
+    const r = usdRub();
+    const k = (usd) => `<small>≈${num(Math.round((usd * r) / 1000))} тыс. ₽</small>`;
+    seg($('tier'), [[0, 'Все цены'], [50, `до $50${k(50)}`], [100, `до $100${k(100)}`], [500, `до $500${k(500)}`]], ui.tier);
+  }
+
   function bind() {
+    renderSegs();
+    $('region').onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      ui.region = b.dataset.v; store.set('region', ui.region);
+      renderSegs(); renderSources(); renderFees(); recompute();
+    };
+    $('tier').onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      ui.tier = +b.dataset.v; store.set('tier', ui.tier);
+      renderSegs(); recompute();
+    };
     const fill = (el, opts, val) => { el.innerHTML = opts.map(([v, t]) => `<option value="${v}" ${String(v) === String(val) ? 'selected' : ''}>${t}</option>`).join(''); };
     const cats = new Set(D.items.map((x) => x[1]));
     fill($('cat'), Object.entries(CAT).filter(([k]) => k === 'all' || cats.has(k)), ui.cat);
@@ -256,7 +292,7 @@
     $('minp').onchange = (e) => { ui.minp = +e.target.value; store.set('minp', ui.minp); recompute(); };
     $('routes').onchange = (e) => {
       const { buy, sell } = e.target.dataset;
-      const [set, key, id] = buy ? [ui.buyOff, 'buyOff', buy] : [ui.sellOff, 'sellOff', sell];
+      const [set, key, id] = buy ? [ui.buyOff, 'buyOff', buy] : [ui.sellOff, 'sellOff2', sell];
       if (!id) return;
       if (e.target.checked) set.delete(id); else set.add(id);
       store.set(key, [...set]); recompute();
@@ -291,7 +327,7 @@
     };
   }
   function renderFeeSum() {
-    $('feesum').textContent = '· ' + D.sources.filter((s) => SITE[s.id]?.sell).map((s) => `${s.name} ${String(ui.fees[s.id].sell).replace('.', ',')}%`).join(', ');
+    $('feesum').textContent = '· ' + shown().filter((s) => SITE[s.id]?.sell).map((s) => `${s.name} ${String(ui.fees[s.id].sell).replace('.', ',')}%`).join(', ');
   }
 
   // ---------- загрузка ----------

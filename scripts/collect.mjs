@@ -157,6 +157,46 @@ const SOURCES = [
       return m;
     },
   },
+
+  // ---------- зарубежные площадки (из России напрямую не пополнить) — цены в долларах, по курсу ЦБ ----------
+  {
+    id: 'skinport', name: 'Skinport', region: 'world',
+    async fetch({ rate }) {
+      // Skinport отвечает только с Brotli; кэширует ответ на 5 минут
+      const list = await get('https://api.skinport.com/v1/items?app_id=730&currency=USD', { headers: { 'Accept-Encoding': 'br' } });
+      const m = new Map();
+      for (const x of list) {
+        if (!x.quantity) continue;
+        m.set(x.market_hash_name, { p: kop(x.min_price * rate.usdRub), q: x.quantity, slug: String(x.item_page || '').replace(/^.*\/item\//, '') });
+      }
+      this.via = `напрямую, курс ${rate.src}`; this.at = Date.now();
+      return m;
+    },
+  },
+  {
+    id: 'waxpeer', name: 'Waxpeer', region: 'world',
+    async fetch({ rate }) {
+      const j = await get('https://api.waxpeer.com/v1/prices?game=csgo&minified=1');
+      const m = new Map();
+      for (const x of j.items || []) if (x.count > 0) m.set(x.name, { p: kop((x.min / 1000) * rate.usdRub), q: x.count }); // min — в тысячных долях доллара
+      this.via = `напрямую, курс ${rate.src}`; this.at = Date.now();
+      return m;
+    },
+  },
+  ...[['buff', 'Buff163', 'buff163'], ['csfloat', 'CSFloat', 'csfloat'], ['youpin', 'Youpin898', 'youpin']].map(([id, name, file]) => ({
+    id, name, region: 'world',
+    async fetch({ rate }) {
+      const j = await get(CSGOTRADER + file + '.json');
+      const m = new Map();
+      for (const [h, x] of Object.entries(j)) {
+        const usd = typeof x === 'number' ? x : x?.starting_at?.price ?? x?.price;
+        const c = kop((usd || 0) * rate.usdRub);
+        if (c) m.set(h, { p: c, q: 0 });
+      }
+      this.via = `сводка csgotrader.app за сутки, курс ${rate.src}`; this.at = Date.now();
+      return m;
+    },
+  })),
 ];
 
 // для LIS-SKINS и CS.MONEY: цены в долларах, свой курс рубля площадки не публикуют. У рублёвых площадок он
@@ -207,7 +247,7 @@ function candidates(items) {
   for (const [h, , , p, q, sv] of items) {
     let best = -Infinity;
     p.forEach((b, i) => {
-      if (!b || b < 10000 || (q[i] && q[i] < 2)) return;
+      if (!b || b < 10000 || (q[i] && q[i] < 2) || SOURCES[i].region) return;
       p.forEach((c, j) => {
         const keep = SELL_KEEP[ids[j]];
         if (!c || i === j || !keep || c > b * 1.8 || (q[j] && q[j] < 2) || (sv[3] && (b < sv[3] * 0.6 || c > sv[3] * 2))) return;
@@ -271,10 +311,10 @@ async function main() {
       return new Map();
     }
   };
-  const [steam, tm, ...usd] = SOURCES;
+  const [steam, tm, ...rest] = SOURCES;
   // LIS-SKINS и CS.MONEY пересчитываются по курсу Market.CSGO — поэтому после него
   const [steamRes, tmRes] = await Promise.all([run(steam, { rate }), run(tm, { rate })]);
-  const results = [steamRes, tmRes, ...await Promise.all(usd.map((s) => run(s, { rate, tmRate: tm.rate })))];
+  const results = [steamRes, tmRes, ...await Promise.all(rest.map((s) => run(s, { rate, tmRate: tm.rate })))];
   if (results.filter((m) => m.size).length < 2) throw new Error('меньше двух площадок ответили — данные не обновляю');
 
   const names = new Set();
@@ -303,7 +343,7 @@ async function main() {
 
   const now = Date.now();
   const sources = SOURCES.map((s, i) => ({
-    id: s.id, name: s.name, count: results[i].size, via: s.via || null, at: s.at || null, rate: s.rate || null, error: s.error || null,
+    id: s.id, name: s.name, region: s.region || 'ru', count: results[i].size, via: s.via || null, at: s.at || null, rate: s.rate || null, error: s.error || null,
   }));
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
