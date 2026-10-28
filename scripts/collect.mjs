@@ -85,7 +85,11 @@ const SOURCES = [
         m.set(h, { p: Math.round(c * rate), q }); // центы × курс = копейки
         newest = Math.max(newest, t);
       }
-      if (!m.size) throw new Error('цены Steam с VPS устарели');
+      if (!m.size) {
+        const c = s.cursor || {};
+        throw new Error(Object.keys(s.prices).length ? 'цены Steam с VPS устарели'
+          : c.cooldownUntil ? 'VPS ещё собирает: Steam ограничил запросы, сбор продолжится после паузы' : 'VPS ещё не собрал цены');
+      }
       this.via = rub ? 'с VPS, в рублях' : `с VPS, курс Steam ${rate.toFixed(2)} ₽/$`;
       this.at = newest;
       return m;
