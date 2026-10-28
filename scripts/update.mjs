@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // CS2 Skin Pulse — сбор каталога скинов, цен Steam Market и расчёт топов.
 //
-//   node scripts/update.mjs           — быстрый прогон (каждые 30 мин): цены Steam + быстрый топ
+//   node scripts/update.mjs           — быстрый прогон (каждые 30 мин): цены Steam и Skinport + быстрый топ
 //   node scripts/update.mjs --daily   — суточный прогон: обновить каталог + топ «долгий холд»
+//
+// Топы на главной считаются по Skinport: он одним запросом отдаёт все предметы CS2
+// (оружие, наклейки, агенты, кейсы, граффити…), а Steam за 30 минут успевает только часть скинов.
 //
 // Переменные окружения:
 //   STATE_DIR   папка с состоянием между прогонами (по умолчанию ./state)
@@ -36,6 +39,9 @@ const DAY = 24 * H;
 const INTRADAY_KEEP = 30 * H;
 const DAILY_KEEP = 400;
 const STALE = 4 * H; // полный обход ~16 тыс. позиций по 10 штук занимает 1–2 часа
+const MARKET_STALE = 2 * H;
+const MARKET_KEEP = 120; // дней истории Skinport — хватает на окно 90 дней
+const SKINPORT = 'https://api.skinport.com/v1/items?app_id=730&currency=USD';
 
 const FAST_WINDOWS = { '1h': 1 * H, '6h': 6 * H, '24h': 24 * H };
 const LONG_WINDOWS = { '7d': 7, '30d': 30, '90d': 90 };
@@ -149,7 +155,25 @@ async function buildCatalog() {
   }));
 
   log(`catalog: ${list.length} skins, ${seen.size} market items, ${collections.length} collections, ${cratesOut.length} crates`);
-  return { builtAt: NOW, skins: list, groups: { rarities, collections, crates: cratesOut, operations: ops } };
+  return { builtAt: NOW, skins: list, groups: { rarities, collections, crates: cratesOut, operations: ops }, extras: await buildExtras(crates) };
+}
+
+// остальные предметы рынка (наклейки, агенты, кейсы…): hash → [картинка, тип, цвет редкости]
+const EXTRA_SOURCES = {
+  'stickers.json': 'stickers', 'agents.json': 'agents', 'graffiti.json': 'graffiti', 'music_kits.json': 'music',
+  'patches.json': 'patches', 'keychains.json': 'charms', 'highlights.json': 'charms', 'keys.json': 'keys', 'collectibles.json': 'collectibles',
+};
+async function buildExtras(crates) {
+  const out = {};
+  const add = (list, cat) => {
+    for (const x of list) if (x.market_hash_name && !out[x.market_hash_name]) out[x.market_hash_name] = [x.image || '', cat, x.rarity?.color || ''];
+  };
+  add(crates, 'cases');
+  for (const [file, cat] of Object.entries(EXTRA_SOURCES)) {
+    try { add(await loadSource(file), cat); } catch (e) { log('extras', file, e.message); }
+  }
+  log(`extras: ${Object.keys(out).length} items`);
+  return out;
 }
 
 // ---------- Steam ----------
@@ -221,6 +245,30 @@ async function fetchSteam(hashes, prices, cursor) {
   return got;
 }
 
+// ---------- Skinport: все предметы CS2 одним запросом (кэш на их стороне 5 мин) ----------
+async function fetchSkinport() {
+  const r = await fetch(SKINPORT, { headers: { 'Accept-Encoding': 'br' }, signal: AbortSignal.timeout(120_000) });
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160)}`);
+  const list = await r.json();
+  if (!Array.isArray(list) || list.length < 1000) throw new Error(`unexpected answer (${Array.isArray(list) ? list.length : typeof list})`);
+  const now = Date.now(), out = {};
+  for (const x of list) {
+    const c = Math.round(Number(x.min_price) * 100);
+    out[x.market_hash_name] = [x.quantity > 0 && c > 0 ? c : 0, x.quantity || 0, now, String(x.item_page || '').replace(/^.*\/item\//, '')];
+  }
+  return out;
+}
+
+function mockMarket(catalog, market) {
+  const names = [...catalog.skins.flatMap((s) => s.v.map((v) => v[0])), ...Object.keys(catalog.extras || {})];
+  const out = {};
+  for (const h of names) {
+    const prev = market[h]?.[0] || Math.round(5 + Math.random() * 5000);
+    out[h] = [Math.max(3, Math.round(prev * Math.exp((Math.random() - 0.5) * 0.06))), Math.round(Math.random() * 200), NOW, ''];
+  }
+  return out;
+}
+
 function mockPrices(catalog, prices) {
   const base = { rarity_common_weapon: 8, rarity_uncommon_weapon: 15, rarity_rare_weapon: 40, rarity_mythical_weapon: 180,
     rarity_legendary_weapon: 700, rarity_ancient_weapon: 2500, rarity_ancient: 15000, rarity_contraband: 300000 };
@@ -241,8 +289,22 @@ function ensureNames(state, hashes) {
   state.idx = new Map(state.names.map((h, i) => [h, i]));
   for (const h of hashes) if (!state.idx.has(h)) { state.idx.set(h, state.names.length); state.names.push(h); }
 }
-function snapshotRow(names, prices) {
-  return names.map((h) => { const p = prices[h]; return p && p[0] > 0 && NOW - p[2] < STALE ? p[0] : 0; });
+function snapshotRow(names, prices, stale = STALE) {
+  return names.map((h) => { const p = prices[h]; return p && p[0] > 0 && NOW - p[2] < stale ? p[0] : 0; });
+}
+// добавить снимок цен в историю: внутри дня по 30 мин, плюс последняя цена каждого дня
+function pushSnapshot(series, row, keepDays) {
+  const it = series.intraday;
+  if (it.ts.length && NOW - it.ts[it.ts.length - 1] < 10 * 60_000) { it.ts.pop(); it.rows.pop(); }
+  it.ts.push(NOW); it.rows.push(row);
+  while (it.ts.length && it.ts[0] < NOW - INTRADAY_KEEP) { it.ts.shift(); it.rows.shift(); }
+
+  const d = series.daily, today = dayStr(NOW);
+  if (d.days[d.days.length - 1] !== today) { d.days.push(today); d.rows.push([]); }
+  const dr = d.rows[d.rows.length - 1];
+  row.forEach((v, j) => { if (v) dr[j] = v; });
+  for (let j = 0; j < dr.length; j++) if (dr[j] === undefined || dr[j] === null) dr[j] = 0;
+  while (d.days.length > keepDays) { d.days.shift(); d.rows.shift(); }
 }
 const cell = (row, j) => (row && row[j]) || 0;
 
@@ -258,19 +320,48 @@ function oldValue(rows, idx, j, last) {
   return 0;
 }
 
-function rank(names, curRow, oldRow, prices, filter, skinOf) {
+function rank(names, curRow, oldRow, prices, filter) {
   const out = [];
   for (let j = 0; j < names.length; j++) {
     const cur = cell(curRow, j), old = oldRow(j);
     if (!cur || !old || cur < filter.minPrice || old < filter.minOld) continue;
     const l = prices[names[j]]?.[1] || 0;
-    if (l < filter.minListings) continue;
-    const s = skinOf.get(names[j]);
-    if (!s) continue;
-    out.push({ h: names[j], s: s.id, p: cur, o: old, ch: pct(cur, old), l });
+    if (l < filter.minListings || cur <= old) continue; // в топ роста — только подорожавшие
+    out.push({ h: names[j], p: cur, o: old, ch: pct(cur, old), l });
   }
   out.sort((a, b) => b.ch - a.ch || b.p - a.p);
   return out.slice(0, TOP_N);
+}
+
+function topFastOf(series, prices, filter) {
+  const it = series.intraday, last = it.rows.length;
+  const cur = it.rows[last - 1];
+  const top = { updatedAt: NOW, src: 'skinport', windows: {} };
+  for (const [key, win] of Object.entries(FAST_WINDOWS)) {
+    const idx = last >= 2 ? pastIndex(it.ts.slice(0, -1), NOW - win, win * 0.5, 10 * 60_000) : -1;
+    if (idx < 0) { top.windows[key] = { span: 0, items: [] }; continue; }
+    const span = Math.round((NOW - it.ts[idx]) / 60_000);
+    top.windows[key] = { span, items: rank(series.names, cur, (j) => oldValue(it.rows, idx, j, last - 1), prices, filter) };
+  }
+  return top;
+}
+
+function topLongOf(series, prices, filter) {
+  const d = series.daily;
+  // берём последний ЗАКРЫТЫЙ день; если есть только сегодняшний — его
+  let li = d.days.length - 1;
+  if (li > 0 && d.days[li] === dayStr(NOW)) li--;
+  const top = { updatedAt: NOW, src: 'skinport', day: d.days[li] || null, windows: {} };
+  for (const [key, days] of Object.entries(LONG_WINDOWS)) {
+    if (li < 1) { top.windows[key] = { days: 0, items: [] }; continue; }
+    const target = Date.parse(d.days[li]) - days * DAY;
+    const times = d.days.slice(0, li).map((x) => Date.parse(x));
+    const idx = pastIndex(times, target, DAY, 0);
+    if (idx < 0) { top.windows[key] = { days: 0, items: [] }; continue; }
+    const span = Math.round((Date.parse(d.days[li]) - times[idx]) / DAY);
+    top.windows[key] = { days: span, from: d.days[idx], items: rank(series.names, d.rows[li], (j) => oldValue(d.rows, idx, j, li), prices, filter) };
+  }
+  return top;
 }
 
 function mergeBackfill(series, data) {
@@ -333,7 +424,7 @@ async function fetchBuff(hashes) {
 async function main() {
   log(`mode=${RENDER ? 'render' : DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
   let catalog = readState('catalog', null);
-  if (!catalog || (!RENDER && (DAILY || NOW - catalog.builtAt > 3 * DAY))) {
+  if (!catalog || (!RENDER && (DAILY || NOW - catalog.builtAt > 3 * DAY || !catalog.extras))) {
     try { catalog = await buildCatalog(); writeState('catalog', catalog); }
     catch (e) { if (!catalog) throw e; log('catalog refresh failed, using cached:', e.message); }
   }
@@ -361,59 +452,42 @@ async function main() {
     mergeBackfill(series, bf.data);
   }
 
+  // рынок Skinport — все предметы CS2, по нему считаются оба топа
+  const market = readState('market', {});
+  const mseries = readState('market_series', { names: [], intraday: { ts: [], rows: [] }, daily: { days: [], rows: [] } });
+  const mcursor = readState('market_cursor', {});
+  ensureNames(mseries, Object.keys(market));
+
   if (!DAILY && !RENDER) {
+    try {
+      Object.assign(market, MOCK ? mockMarket(catalog, market) : await fetchSkinport());
+      mcursor.lastOk = Date.now(); mcursor.error = null;
+      ensureNames(mseries, Object.keys(market));
+      pushSnapshot(mseries, snapshotRow(mseries.names, market, MARKET_STALE), MARKET_KEEP);
+      log(`skinport: ${Object.keys(market).length} items`);
+      writeState('market', market);
+      writeState('market_series', { names: mseries.names, intraday: mseries.intraday, daily: mseries.daily });
+    } catch (e) {
+      mcursor.error = { at: Date.now(), msg: String(e.message).slice(0, 220) };
+      log('skinport failed:', e.message);
+    }
+    writeState('market_cursor', mcursor);
+    topFast = topFastOf(mseries, market, FAST_FILTER);
+    writeState('top_fast', topFast);
+
+    // Steam — после Skinport: обход идёт до BUDGET_MIN минут и не должен сдвигать снимок рынка
     const got = MOCK ? mockPrices(catalog, prices) : await fetchSteam(hashes, prices, cursor);
     ensureNames(series, Object.keys(prices));
-    if (got > 0) {
-      const row = snapshotRow(series.names, prices);
-      const it = series.intraday;
-      if (it.ts.length && NOW - it.ts[it.ts.length - 1] < 10 * 60_000) { it.ts.pop(); it.rows.pop(); }
-      it.ts.push(NOW); it.rows.push(row);
-      while (it.ts.length && it.ts[0] < NOW - INTRADAY_KEEP) { it.ts.shift(); it.rows.shift(); }
-
-      const d = series.daily, today = dayStr(NOW);
-      if (d.days[d.days.length - 1] !== today) { d.days.push(today); d.rows.push([]); }
-      const dr = d.rows[d.rows.length - 1];
-      row.forEach((v, j) => { if (v) dr[j] = v; });
-      for (let j = 0; j < dr.length; j++) if (dr[j] === undefined || dr[j] === null) dr[j] = 0;
-      while (d.days.length > DAILY_KEEP) { d.days.shift(); d.rows.shift(); }
-    }
-
-    // быстрый топ
-    const it = series.intraday, last = it.rows.length;
-    const cur = it.rows[last - 1];
-    topFast = { updatedAt: NOW, windows: {} };
-    for (const [key, win] of Object.entries(FAST_WINDOWS)) {
-      const idx = last >= 2 ? pastIndex(it.ts.slice(0, -1), NOW - win, win * 0.5, 10 * 60_000) : -1;
-      if (idx < 0) { topFast.windows[key] = { span: 0, items: [] }; continue; }
-      const span = Math.round((NOW - it.ts[idx]) / 60_000);
-      topFast.windows[key] = { span, items: rank(series.names, cur, (j) => oldValue(it.rows, idx, j, last - 1), prices, FAST_FILTER, skinOf) };
-    }
-    writeState('top_fast', topFast);
+    if (got > 0) pushSnapshot(series, snapshotRow(series.names, prices), DAILY_KEEP);
     writeState('prices', prices);
     writeState('cursor', cursor);
   } else {
     ensureNames(series, Object.keys(prices));
   }
 
-  // долгий холд — раз в сутки (или если его ещё нет)
-  const bfNewer = bf?.updatedAt && (!topLong || bf.updatedAt > (topLong.bfAt || 0));
-  if ((DAILY && !RENDER) || !topLong || (!RENDER && bfNewer)) {
-    const d = series.daily;
-    const todayStr = dayStr(NOW);
-    // берём последний ЗАКРЫТЫЙ день; если есть только сегодняшний — его
-    let li = d.days.length - 1;
-    if (li > 0 && d.days[li] === todayStr) li--;
-    topLong = { updatedAt: NOW, bfAt: bf?.updatedAt || 0, day: d.days[li] || null, windows: {} };
-    for (const [key, days] of Object.entries(LONG_WINDOWS)) {
-      if (li < 1) { topLong.windows[key] = { days: 0, items: [] }; continue; }
-      const target = Date.parse(d.days[li]) - days * DAY;
-      const times = d.days.slice(0, li).map((x) => Date.parse(x));
-      const idx = pastIndex(times, target, DAY, 0);
-      if (idx < 0) { topLong.windows[key] = { days: 0, items: [] }; continue; }
-      const span = Math.round((Date.parse(d.days[li]) - times[idx]) / DAY);
-      topLong.windows[key] = { days: span, from: d.days[idx], items: rank(series.names, d.rows[li], (j) => oldValue(d.rows, idx, j, li), prices, LONG_FILTER, skinOf) };
-    }
+  // долгий холд — раз в сутки (или если его ещё нет / он посчитан по старому источнику)
+  if ((DAILY && !RENDER) || !topLong || (!RENDER && topLong.src !== 'skinport')) {
+    topLong = topLongOf(mseries, market, LONG_FILTER);
     writeState('top_long', topLong);
   }
   writeState('series', { names: series.names, intraday: series.intraday, daily: series.daily });
@@ -459,11 +533,20 @@ async function main() {
   fs.rmSync(OUT, { recursive: true, force: true });
   writeOut('catalog.json', { updatedAt: NOW, skins: skinsOut, groups: catalog.groups });
 
+  // к позиции топа — картинка, тип и цвет редкости; скины ведут на свою страницу, остальное — на Skinport
+  const extras = catalog.extras || {};
+  const guessCat = (h) => (/^Sticker \|/.test(h) ? 'stickers' : /^Patch \|/.test(h) ? 'patches' : /^(Souvenir )?Charm \|/.test(h) ? 'charms'
+    : /Graffiti \|/.test(h) ? 'graffiti' : /Music Kit \|/.test(h) ? 'music' : !h.includes('|') && /Case|Capsule|Package|Souvenir/.test(h) ? 'cases' : 'other');
   const decorate = (top) => top && {
     ...top,
     windows: Object.fromEntries(Object.entries(top.windows).map(([k, w]) => [k, {
       ...w,
-      items: w.items.map((x) => { const s = skinOf.get(x.h); return s ? { ...x, img: s.img, r: s.r, c: s.c } : x; }),
+      items: w.items.map((x) => {
+        const s = skinOf.get(x.h);
+        if (s) return { ...x, s: s.id, img: s.img, r: s.r, c: s.c };
+        const e = extras[x.h];
+        return { ...x, img: e?.[0] || '', c: e?.[1] || guessCat(x.h), rc: e?.[2] || '', u: market[x.h]?.[3] || '' };
+      }),
     }])),
   };
   writeOut('top_fast.json', decorate(topFast) || { updatedAt: null, windows: {} });
@@ -505,6 +588,8 @@ async function main() {
     fastUpdatedAt: topFast?.updatedAt || null,
     longUpdatedAt: topLong?.updatedAt || null,
     filters: { fast: FAST_FILTER, long: LONG_FILTER },
+    market: { src: 'skinport', items: Object.values(market).filter((x) => x[0] > 0).length, at: mcursor.lastOk || null,
+      error: mcursor.error || null, snapshots: mseries.intraday.ts.length, days: mseries.daily.days.length },
     backfill: bf ? { status: bf.status, done: Object.keys(bf.data || {}).length, total: bf.total || 0, updatedAt: bf.updatedAt || null } : null,
   };
   writeOut('meta.json', meta);

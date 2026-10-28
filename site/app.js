@@ -2,7 +2,8 @@
 (() => {
   'use strict';
 
-  const CAT = { pistols: 'Пистолеты', smgs: 'Пистолеты-пулемёты', rifles: 'Винтовки', heavy: 'Тяжёлое', knives: 'Ножи', gloves: 'Перчатки', equipment: 'Снаряжение', other: 'Другое' };
+  const CAT = { pistols: 'Пистолеты', smgs: 'Пистолеты-пулемёты', rifles: 'Винтовки', heavy: 'Тяжёлое', knives: 'Ножи', gloves: 'Перчатки', equipment: 'Снаряжение', other: 'Другое',
+    stickers: 'Наклейки', agents: 'Агенты', cases: 'Кейсы и капсулы', graffiti: 'Граффити', music: 'Музыкальные наборы', patches: 'Нашивки', charms: 'Брелоки', keys: 'Ключи', collectibles: 'Значки' };
   const CAT_ORDER = ['knives', 'gloves', 'rifles', 'pistols', 'smgs', 'heavy', 'equipment', 'other'];
   const RARITY_RU = {
     rarity_common_weapon: 'Ширпотреб', rarity_uncommon_weapon: 'Промышленное', rarity_rare_weapon: 'Армейское',
@@ -54,6 +55,10 @@
   };
   const spanTxt = (min) => (min >= 1440 ? `${Math.round(min / 1440)} дн` : min >= 60 ? `${Math.round(min / 60)} ч` : `${min} мин`);
   const steamUrl = (h) => 'https://steamcommunity.com/market/listings/730/' + encodeURIComponent(h);
+  const NOIMG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 3"><rect width="4" height="3" rx=".3" fill="#8884"/></svg>');
+  // позиция топа: скин — на свою страницу, остальные предметы — на Skinport (цены топа оттуда)
+  const topHref = (x) => (x.s ? `href="#/skin/${x.s}?v=${encodeURIComponent(x.h)}"`
+    : `href="${esc(x.u ? 'https://skinport.com/item/' + x.u : 'https://skinport.com/market?search=' + encodeURIComponent(x.h))}" target="_blank" rel="noopener"`);
   const imgUrl = (u, size = '360fx360f') => (u && u.includes('/economy/image/') && !/\/\d+fx\d+f$/.test(u) ? `${u}/${size}` : u);
   const variantLabel = (h) => {
     const m = h.match(/\(([^)]+)\)$/);
@@ -113,11 +118,11 @@
   function topRows(items, kind) {
     if (!items?.length) return '';
     const [lead, ...rest] = items;
-    const s = D.byId.get(lead.s);
+    const s = lead.s && D.byId.get(lead.s);
     const leadHtml = `
-      <a class="leader" style="--rc:${rc(lead.r)}" href="#/skin/${lead.s}?v=${encodeURIComponent(lead.h)}">
+      <a class="leader" style="--rc:${lead.rc || rc(lead.r)}" ${topHref(lead)}>
         <div class="leader__rank">№1 · ${kind === 'fast' ? 'БЫСТРЕЕ ВСЕХ' : 'ЛУЧШИЙ ХОЛД'}</div>
-        <img src="${esc(imgUrl(lead.img))}" alt="" loading="lazy">
+        <img src="${esc(imgUrl(lead.img) || NOIMG)}" alt="" loading="lazy">
         <div style="flex:1;min-width:180px">
           <div class="leader__name">${esc(lead.h)}</div>
           <div class="muted" style="font-size:13px">${esc(CAT[lead.c] || '')}${s ? ' · ' + esc(RARITY_RU[s.r] || '') : ''}</div>
@@ -129,9 +134,9 @@
         </div>
       </a>`;
     const rows = rest.map((x, i) => `
-      <a class="row" href="#/skin/${x.s}?v=${encodeURIComponent(x.h)}">
+      <a class="row" ${topHref(x)}>
         <span class="row__n">${i + 2}</span>
-        <img src="${esc(imgUrl(x.img, '128fx96f'))}" alt="" loading="lazy">
+        <img src="${esc(imgUrl(x.img, '128fx96f') || NOIMG)}" alt="" loading="lazy">
         <span class="row__name"><b>${esc(x.h)}</b><small>${esc(CAT[x.c] || '')} · ${num(x.l)} лотов</small><small class="row__pm">${money(x.o)} → <b>${money(x.p)}</b></small></span>
         <span class="row__p">${money(x.p)}<small>было ${money(x.o)}</small></span>
         <span class="chip-ch ${chCls(x.ch)}">${chTxt(x.ch)}</span>
@@ -148,8 +153,8 @@
     let note;
     if (kind === 'fast') note = `Пересчёт каждые 30 минут · обновлено ${ago(data?.updatedAt)}${w?.span ? ` · сравнение с ценой ${spanTxt(w.span)} назад` : ''}`;
     else note = `Пересчёт раз в сутки · обновлено ${ago(data?.updatedAt)}${w?.days ? ` · рост за ${w.days} дн (с ${w.from})` : ''}`;
-    const bf = D.meta?.backfill;
-    if (kind === 'long' && bf && bf.status !== 'done' && bf.total) note += ` · история Steam загружена для ${num(bf.done)} из ${num(bf.total)} позиций`;
+    const mk = D.meta?.market;
+    if (data?.src === 'skinport') note += ` · все предметы CS2 по ценам Skinport (минимальный лот)${mk?.error && mk.error.at > (mk.at || 0) ? ` · Skinport не ответил ${ago(mk.error.at)}` : ''}`;
     const body = w?.items?.length ? topRows(w.items, kind)
       : `<div class="empty"><b>История цен ещё накапливается</b>${kind === 'fast'
         ? 'Для этого окна нужно ещё несколько снимков цен. Сбор идёт каждые 30 минут.'
@@ -172,10 +177,11 @@
       <section class="hero">
         <div>
           <h1>Пульс рынка <em>скинов CS2</em></h1>
-          <p>Все скины по оружию, коллекциям, кейсам и операциям. Цены с торговой площадки Steam, быстрый топ растущих скинов каждые 30 минут и рейтинг для долгого холда раз в сутки.</p>
+          <p>Все скины по оружию, коллекциям, кейсам и операциям с ценами Steam. На главной — топ растущих предметов CS2 (оружие, наклейки, агенты, кейсы и всё остальное) по ценам Skinport: быстрый каждые 30 минут и для долгого холда раз в сутки.</p>
         </div>
         <div class="stats">
           <div class="stat"><b>${num(m.skins)}</b><span>скинов в базе</span></div>
+          ${m.market?.items ? `<div class="stat"><b>${num(m.market.items)}</b><span>предметов в топах</span></div>` : ''}
           <div class="stat"><b>${num(m.priced)}</b><span>цен Steam${m.buffPriced ? ` + ${num(m.buffPriced)} Buff` : ''}</span></div>
           <div class="stat"><b class="${best24 ? 'up' : ''}">${best24 ? chTxt(best24.ch) : '—'}</b><span>лидер роста за 24ч</span></div>
         </div>
