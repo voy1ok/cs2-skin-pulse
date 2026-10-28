@@ -9,6 +9,8 @@
 //   BUDGET_MIN     сколько минут работать за запуск (по умолчанию 25)
 //   STEAM_DELAY_MS пауза между запросами (по умолчанию 6000)
 //   STEAM_COOKIE   значение cookie steamLoginSecure — с ним Steam отдаёт 100 позиций за запрос вместо 10
+//   SITE_URL       адрес сайта: оттуда берётся список предметов, для которых нужны продажи в Steam
+//   VOLUME_PER_RUN сколько предметов за запуск проверять на число продаж (по умолчанию 80)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +20,9 @@ const STATE = process.env.STATE_DIR || 'steam';
 const BUDGET = (Number(process.env.BUDGET_MIN) || 25) * 60_000;
 const DELAY = Number(process.env.STEAM_DELAY_MS) || 6000;
 const COOKIE = (process.env.STEAM_COOKIE || '').trim();
+const SITE = (process.env.SITE_URL || '').replace(/\/?$/, '/');
+const VOLUME_PER_RUN = Number(process.env.VOLUME_PER_RUN) || 80;
+const VOLUME_FRESH = 20 * 3_600_000; // продажи за сутки перепроверяем не чаще раза в 20 часов
 const T0 = Date.now();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 
@@ -77,6 +82,41 @@ async function main() {
   if (c.cooldownUntil && Date.now() < c.cooldownUntil) {
     log(`steam: пауза после 429 до ${new Date(c.cooldownUntil).toISOString()}`);
     return write('steam.json.gz', s);
+  }
+
+  // продажи за сутки в Steam — для самых выгодных предметов (список считает сайт), устаревшие первыми
+  if (SITE.length > 1) {
+    const vol = read('volume.json.gz', { items: {} });
+    let list = [];
+    try {
+      const r = await fetch(`${SITE}data/candidates.json?x=${Date.now()}`, { signal: AbortSignal.timeout(30_000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      list = (await r.json()).items || [];
+    } catch (e) { log('candidates failed:', e.message); }
+    const todo = list.filter((h) => !vol.items[h] || Date.now() - vol.items[h][1] > VOLUME_FRESH).slice(0, VOLUME_PER_RUN);
+    let n = 0;
+    for (const h of todo) {
+      try {
+        const j = await steam(`https://steamcommunity.com/market/priceoverview/?appid=730&currency=5&market_hash_name=${encodeURIComponent(h)}`);
+        // «77,007» — тысячи через запятую; нет поля — продаж за сутки не было
+        vol.items[h] = [Number(String(j.volume || '0').replace(/\D/g, '')) || 0, Date.now()];
+        n++;
+      } catch (e) {
+        if (e.status === 429) {
+          c.cooldowns = (c.cooldowns || 0) + 1;
+          c.cooldownUntil = Date.now() + Math.min(120, 15 * 2 ** (c.cooldowns - 1)) * 60_000;
+          log(`steam volume 429, пауза до ${new Date(c.cooldownUntil).toISOString()}`);
+          break;
+        }
+        log(`volume ${h}: ${e.message}`);
+      }
+      await sleep(DELAY);
+    }
+    // старше недели — не нужно
+    for (const [h, [, t]] of Object.entries(vol.items)) if (Date.now() - t > 7 * 86_400_000) delete vol.items[h];
+    write('volume.json.gz', vol);
+    log(`steam volume: ${n} of ${todo.length} checked, ${Object.keys(vol.items).length} known, ${list.length} candidates`);
+    if (c.cooldownUntil && Date.now() < c.cooldownUntil) return write('steam.json.gz', s);
   }
 
   // курс Steam — раз в 6 часов

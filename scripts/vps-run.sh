@@ -22,7 +22,8 @@ if [ ! -d "$STATE" ]; then
   rm -rf "$STATE/.git"
 fi
 
-STATE_DIR="$STATE" STEAM_COOKIE="${STEAM_COOKIE:-}" BUDGET_MIN="${BUDGET_MIN:-25}" STEAM_DELAY_MS="${STEAM_DELAY_MS:-6000}" \
+owner=${REPO%/*}; repo=${REPO#*/}
+STATE_DIR="$STATE" SITE_URL="https://${owner,,}.github.io/${repo}/" STEAM_COOKIE="${STEAM_COOKIE:-}" BUDGET_MIN="${BUDGET_MIN:-25}" STEAM_DELAY_MS="${STEAM_DELAY_MS:-6000}" \
   node --max-old-space-size=300 "$BASE/app/scripts/steam-crawl.mjs"
 
 cd "$STATE"

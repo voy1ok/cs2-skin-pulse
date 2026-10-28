@@ -20,6 +20,10 @@ const T0 = Date.now();
 const H = 3_600_000;
 const DAY = 24 * H;
 const STEAM_MAX_AGE = 36 * H; // цену Steam старше полутора суток не показываем
+const VOLUME_MAX_AGE = 3 * DAY; // продажи Steam за сутки — считаем актуальными 3 дня
+const CANDIDATES = 1500;        // сколько самых выгодных предметов отдаём VPS, чтобы он узнал их продажи в Steam
+// комиссии продажи по умолчанию — те же, что на сайте (site/app.js, SITE)
+const SELL_KEEP = { steam: 1 - 0.1304, tm: 0.95 };
 const BYMYKEL = 'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/';
 const CSGOTRADER = 'https://prices.csgotrader.app/latest/';
 const STEAM_IMG = 'https://community.akamai.steamstatic.com/economy/image/';
@@ -157,6 +161,42 @@ async function impliedRate(rubMap) {
   return Math.round(k * 100) / 100;
 }
 
+// продажи: Skinport отдаёт число продаж за 7 и 30 дней сразу по всем предметам. Покупать там из России
+// нельзя, но как мера спроса годится; точное число продаж за сутки — по Steam, его собирает VPS.
+// Заодно — медиана цены сделок за 30 дней: по ней отсеиваем явно ошибочные цены площадок.
+async function getSales(rate) {
+  const list = await get('https://api.skinport.com/v1/sales/history?app_id=730&currency=USD', { headers: { 'Accept-Encoding': 'br' } });
+  const m = new Map();
+  for (const x of list) m.set(x.market_hash_name, [x.last_7_days?.volume || 0, x.last_30_days?.volume || 0, kop((x.last_30_days?.median || 0) * rate)]);
+  return m;
+}
+function steamVolumes() {
+  const v = readGz(path.join(STEAM_DIR, 'volume.json.gz'));
+  const m = new Map();
+  for (const [h, [n, t]] of Object.entries(v?.items || {})) if (T0 - t < VOLUME_MAX_AGE) m.set(h, n);
+  return m;
+}
+
+// предметы, у которых есть выгодный маршрут при комиссиях по умолчанию. Порядок — как «Лучшие» на сайте
+// (выгода в рублях × ликвидность по Skinport), чтобы VPS первыми проверял в Steam самые перспективные
+function candidates(items) {
+  const ids = SOURCES.map((s) => s.id);
+  const out = [];
+  for (const [h, , , p, q, sv] of items) {
+    let best = -Infinity;
+    p.forEach((b, i) => {
+      if (!b || b < 10000 || (q[i] && q[i] < 2)) return;
+      p.forEach((c, j) => {
+        const keep = SELL_KEEP[ids[j]];
+        if (!c || i === j || !keep || c > b * 1.8 || (q[j] && q[j] < 2) || (sv[3] && (b < sv[3] * 0.6 || c > sv[3] * 2))) return;
+        best = Math.max(best, c * keep - b);
+      });
+    });
+    if (best > 0) out.push([h, best * Math.min(1, (sv[1] + 1) / 20)]);
+  }
+  return out.sort((a, b) => b[1] - a[1]).slice(0, CANDIDATES).map((x) => x[0]);
+}
+
 // ---------- справочник предметов: картинка, тип, цвет редкости ----------
 const CATEGORY = { Pistols: 'pistols', SMGs: 'smgs', Rifles: 'rifles', Heavy: 'heavy', Knives: 'knives', Gloves: 'gloves' };
 const EXTRA = {
@@ -195,6 +235,9 @@ const guessCat = (h) => (/^Sticker \|/.test(h) ? 'stickers' : /^Patch \|/.test(h
 // ---------- main ----------
 async function main() {
   const [refs, rate] = await Promise.all([getRefs(), getRate()]);
+  const sales = await getSales(rate.usdRub).catch((e) => { log('skinport sales:', e.message); return new Map(); });
+  const vols = steamVolumes();
+  log(`sales: skinport ${sales.size}, steam ${vols.size}`);
   const run = async (s, ctx) => {
     try {
       const m = await s.fetch(ctx);
@@ -228,8 +271,11 @@ async function main() {
     imgs.set(h, img.startsWith(STEAM_IMG) ? img.slice(STEAM_IMG.length) : img);
     const slugs = {};
     results.forEach((m, i) => { const s = m.get(h)?.slug; if (s && s !== slugify(h)) slugs[SOURCES[i].id] = s; });
-    // [название, тип, цвет редкости, цены лотов в копейках, число лотов, адреса на площадках]
-    items.push([h, ref?.[1] || guessCat(h), ref?.[2] || '', p, q, ...(Object.keys(slugs).length ? [slugs] : [])]);
+    // продажи: [Steam за сутки (-1 — не знаем), Skinport за 7 дней, за 30 дней, медиана сделок Skinport за 30 дней в копейках]
+    const sp = sales.get(h) || [0, 0, 0];
+    const sv = [vols.has(h) ? vols.get(h) : -1, sp[0], sp[1], sp[2]];
+    // [название, тип, цвет редкости, цены лотов в копейках, число лотов, продажи, адреса на площадках]
+    items.push([h, ref?.[1] || guessCat(h), ref?.[2] || '', p, q, sv, ...(Object.keys(slugs).length ? [slugs] : [])]);
   }
   items.sort((a, b) => (a[0] < b[0] ? -1 : 1));
 
@@ -242,7 +288,12 @@ async function main() {
   fs.writeFileSync(path.join(OUT, 'items.json'), JSON.stringify({ updatedAt: now, sources, items }));
   // картинки — отдельным файлом в том же порядке: он почти такой же большой, как цены, и нужен не сразу
   fs.writeFileSync(path.join(OUT, 'images.json'), JSON.stringify({ base: STEAM_IMG, images: items.map((x) => imgs.get(x[0])) }));
-  fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify({ updatedAt: now, build: process.env.BUILD || null, items: items.length, rate, sources }));
+  fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify({
+    updatedAt: now, build: process.env.BUILD || null, items: items.length, rate, sources,
+    sales: { skinport: sales.size, steam: vols.size },
+  }));
+  // список для VPS: по каким предметам узнать продажи в Steam в первую очередь
+  fs.writeFileSync(path.join(OUT, 'candidates.json'), JSON.stringify({ updatedAt: now, items: candidates(items) }));
   log(`done: ${items.length} items on 2+ sites`);
 }
 

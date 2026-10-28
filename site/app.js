@@ -7,6 +7,8 @@
     stickers: 'Наклейки', cases: 'Кейсы и капсулы', agents: 'Агенты', charms: 'Брелоки', patches: 'Нашивки', graffiti: 'Граффити',
     music: 'Музыкальные наборы', keys: 'Ключи', collectibles: 'Значки', other: 'Другое',
   };
+  const MIN_SALES = [[0, 'любые'], [1, 'от 1 в сутки'], [5, 'от 5 в сутки'], [20, 'от 20 в сутки'], [100, 'от 100 в сутки']];
+  const LIQUID = 20;      // от 20 продаж в сутки в Steam предмет считаем ходовым: продастся быстро
   const MIN_PRICE = [[0, 'любая'], [5000, '50 ₽'], [10000, '100 ₽'], [50000, '500 ₽'], [100000, '1 000 ₽'], [500000, '5 000 ₽'], [2000000, '20 000 ₽']];
   // площадки: можно ли продать (и выводятся ли деньги), комиссии по умолчанию в процентах
   const SITE = {
@@ -15,7 +17,9 @@
     lis: { sell: false, cash: true, fee: { sell: 0, dep: 0, out: 0 }, note: 'только покупка; цены в $ — проверьте курс на их сайте' },
   };
   const MIN_LOTS = 2;     // если на площадке меньше лотов, её цену не берём
-  const SUSPICIOUS = 3;   // продажа дороже покупки больше чем в 3 раза — почти всегда один случайный лот
+  const SUSPICIOUS = 1.8; // продажа дороже покупки больше чем в 1,8 раза — почти всегда ошибка в данных или случайный лот
+  // цена лота сильно ниже (или продажи — выше) медианы реальных сделок за месяц — тоже ошибка или лот с подвохом
+  const REF_LOW = 0.6, REF_HIGH = 2;
   const PAGE = 50;
   const BUILD = (document.currentScript?.src.match(/[?&]v=([^&]+)/) || [])[1] || null;
 
@@ -36,7 +40,8 @@
 
   const D = { meta: null, sources: [], items: [], images: null, rows: [], shown: PAGE, open: new Set() };
   const ui = {
-    q: '', cat: store.get('cat', 'all'), minp: store.get('minp', 10000), sell: store.get('sell', 'all'), sort: store.get('sort', 'pct'),
+    q: '', cat: store.get('cat', 'all'), minp: store.get('minp', 10000), sell: store.get('sell', 'all'), sort: store.get('sort2', 'best'),
+    mins: store.get('mins', 0),
     fees: Object.fromEntries(Object.entries(SITE).map(([id, s]) => [id, { ...s.fee, ...store.get('fee.' + id, {}) }])),
     lisRate: store.get('rate.lis', 0), // свой курс LIS-SKINS, ₽ за $ (0 — как в данных)
   };
@@ -83,8 +88,18 @@
   // LIS-SKINS отдаёт цены в долларах: если пользователь поставил свой курс, пересчитываем
   const scaled = (it) => it[3].map((c, i) => (c && D.scale[i] !== 1 ? Math.round(c * D.scale[i]) : c));
 
+  // продажи: [Steam за сутки (-1 — не знаем), Skinport за 7 дней, Skinport за 30 дней]
+  // k — множитель ликвидности от 0 до 1; по одному Skinport — с поправкой ×0,5, это лишь оценка спроса
+  function liquidity(s) {
+    const [steam = -1, sp7 = 0, sp30 = 0] = s || [];
+    if (steam >= 0) return { day: steam, k: Math.min(1, steam / LIQUID), src: 'steam' };
+    return { day: null, sp7, sp30, k: Math.min(1, sp7 / LIQUID) * 0.5, src: sp30 ? 'skinport' : null };
+  }
+  const salesTxt = (x) => (x.src === 'steam' ? `${num(x.day)} продаж/сутки в Steam`
+    : x.src === 'skinport' ? `продаж на Skinport: ${num(x.sp7)} за неделю, ${num(x.sp30)} за месяц` : 'продажи неизвестны');
+
   function evaluate(it, idx) {
-    const q = it[4], p = scaled(it);
+    const q = it[4], p = scaled(it), ref = it[5]?.[3] || 0;
     const ok = p.map((c, i) => (c && (!q[i] || q[i] >= MIN_LOTS) ? c : 0));
     let best = null;
     const routes = [];
@@ -93,6 +108,7 @@
       ok.forEach((s, j) => {
         const site = SITE[sid(j)];
         if (!s || i === j || !site?.sell || (ui.sell === 'cash' && !site.cash) || s > b * SUSPICIOUS) return;
+        if (ref && (b < ref * REF_LOW || s > ref * REF_HIGH)) return;
         const buy = cost(i, b), get = proceeds(j, s);
         const r = { i, j, b, s, buy, get, profit: get - buy, pct: (get - buy) / buy };
         routes.push(r);
@@ -100,9 +116,13 @@
       });
     });
     if (!best || best.b < ui.minp) return null;
+    const sales = liquidity(it[5]);
+    if (ui.mins && !(sales.day >= ui.mins)) return null;
     const vals = ok.filter(Boolean);
     const lo = Math.min(...vals), hi = Math.max(...vals);
-    return { idx, it, p, ok, best, routes, spread: (hi - lo) / lo };
+    // «лучшие»: выгода в рублях с поправкой на то, как быстро предмет продаётся (k², чтобы редкие уходили вниз)
+    const score = best.profit > 0 ? best.profit * sales.k * sales.k : best.profit;
+    return { idx, it, p, ok, best, routes, sales, score, spread: (hi - lo) / lo };
   }
 
   function recompute() {
@@ -115,7 +135,10 @@
       const r = evaluate(it, i);
       if (r) rows.push(r);
     });
-    const key = { pct: (r) => r.best.pct, rub: (r) => r.best.profit, spread: (r) => r.spread }[ui.sort];
+    const key = {
+      best: (r) => r.score, pct: (r) => r.best.pct, rub: (r) => r.best.profit, spread: (r) => r.spread,
+      sales: (r) => (r.best.profit > 0 ? (r.sales.day ?? r.sales.sp7 / 100) : -1),
+    }[ui.sort];
     rows.sort((a, b) => key(b) - key(a) || b.best.b - a.best.b);
     D.rows = rows;
     D.shown = PAGE;
@@ -162,7 +185,7 @@
         <button class="row__main" type="button" aria-expanded="${open}">
           <span class="row__n">${n}</span>
           <img src="${esc(img(r.idx, '128fx96f'))}" alt="" loading="lazy" width="64" height="48">
-          <span class="row__name"><b>${esc(h)}</b><small>${esc(CAT[cat] || '')}</small>
+          <span class="row__name"><b>${esc(h)}</b><small>${esc(CAT[cat] || '')} · <span class="liq liq--${r.sales.k >= 1 ? 'hi' : r.sales.k >= 0.25 ? 'mid' : 'lo'}">${esc(salesTxt(r.sales))}</span></small>
             <small class="row__route">${esc(sname(b.i))} ${rub(b.b)} → ${esc(sname(b.j))} ${rub(b.s)}</small></span>
           <span class="row__diff"><span class="chip ${good ? '' : 'chip--bad'}">${main}</span><small>${ui.sort === 'spread' ? 'без комиссий' : rub(b.profit, true)}</small></span>
         </button>
@@ -171,7 +194,7 @@
   }
 
   function detailHtml(r) {
-    const [h, , , , q, slugs] = r.it;
+    const [h, , , , q, , slugs] = r.it;
     const { p } = r;
     const b = r.best;
     const sites = p.map((c, i) => i).filter((i) => p[i]).sort((x, y) => p[x] - p[y]).map((i) => {
@@ -215,6 +238,7 @@
     const cats = new Set(D.items.map((x) => x[1]));
     fill($('cat'), Object.entries(CAT).filter(([k]) => k === 'all' || cats.has(k)), ui.cat);
     fill($('minp'), MIN_PRICE, ui.minp);
+    fill($('mins'), MIN_SALES, ui.mins);
     $('sell').value = ui.sell;
     $('sort').value = ui.sort;
 
@@ -223,7 +247,8 @@
     $('cat').onchange = (e) => { ui.cat = e.target.value; store.set('cat', ui.cat); recompute(); };
     $('minp').onchange = (e) => { ui.minp = +e.target.value; store.set('minp', ui.minp); recompute(); };
     $('sell').onchange = (e) => { ui.sell = e.target.value; store.set('sell', ui.sell); recompute(); };
-    $('sort').onchange = (e) => { ui.sort = e.target.value; store.set('sort', ui.sort); recompute(); };
+    $('sort').onchange = (e) => { ui.sort = e.target.value; store.set('sort2', ui.sort); recompute(); };
+    $('mins').onchange = (e) => { ui.mins = +e.target.value; store.set('mins', ui.mins); recompute(); };
     let ft;
     $('feebox').addEventListener('input', (e) => {
       if (e.target.dataset.rate) {

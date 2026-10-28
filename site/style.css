@@ -82,6 +82,9 @@ img { display: block; }
 .row__name { min-width: 0; display: grid; }
 .row__name b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row__name small { color: var(--muted); font-size: 12px; }
+.liq--hi { color: var(--lo); }
+.liq--mid { color: #f2c14e; }
+.liq--lo { color: var(--dim); }
 .row__route { font-family: var(--mono); color: var(--text) !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row__diff { display: grid; justify-items: end; gap: 2px; }
 .row__diff small { color: var(--muted); font-family: var(--mono); font-size: 12px; }
