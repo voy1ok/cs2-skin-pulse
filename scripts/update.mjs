@@ -472,6 +472,9 @@ async function runMarket(catalog) {
     writeState('market', market);
     writeState('market_series', { names: mseries.names, intraday: mseries.intraday, daily: mseries.daily });
     writeState('top_fast', topFastOf(mseries, market, FAST_FILTER));
+    // долгий холд — раз в сутки, по закрытому дню
+    const topLong = readState('top_long', null);
+    if (!topLong || dayStr(topLong.updatedAt) !== dayStr(NOW)) writeState('top_long', topLongOf(mseries, market, LONG_FILTER));
   } catch (e) {
     mcursor.error = { at: Date.now(), msg: String(e.message).slice(0, 220) };
     log('skinport failed:', e.message);

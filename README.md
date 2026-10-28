@@ -10,8 +10,8 @@
 ## Как это работает
 
 ```
-VPS (cron */5)  ──► vps-run.sh --market ──► update.mjs --market ──► Skinport API (все предметы, быстрый топ)
-VPS (cron */30) ──► vps-run.sh          ──► update.mjs          ──► Steam Market (search/render, USD, каталог)
+GitHub Actions (cron */5) ──► update.mjs --market ──► Skinport API (все предметы, топы) ──► ветка `market`
+VPS (cron */30)           ──► vps-run.sh ──► update.mjs ──► Steam Market (search/render, USD, каталог) ──► ветка `data`
         │
         ├─► ветка `data` — состояние: цены, история (30 ч по 30 мин + до 400 дней)
         └─► repository_dispatch ──► GitHub Actions ──► GitHub Pages (site/ + data/*.json)
@@ -50,7 +50,7 @@ npx serve site                      # открыть сайт
 ## Ограничения
 
 - Steam ограничивает частоту запросов; полный проход по скинам (~1 600 страниц по 10 позиций) занимает часы. Если Steam отвечает 429, прогон продолжится со следующего места в следующий раз. На топы это не влияет.
-- Skinport отвечает только клиентам с поддержкой Brotli (`Accept-Encoding: br`); Node 18+ это умеет.
+- Skinport отвечает только клиентам с поддержкой Brotli (`Accept-Encoding: br`), а с российского VPS не пускает вовсе (Cloudflare 403) — поэтому его опрашивает GitHub Actions. Расписание GitHub может запаздывать на несколько минут.
 - Топ «долгий холд» становится честным после месяца сбора истории; до этого берётся самый ранний доступный день.
 - GitHub отключает расписание в репозиториях без активности 60 дней — если это случится, включите workflow во вкладке Actions.
 - Не является инвестиционной рекомендацией.

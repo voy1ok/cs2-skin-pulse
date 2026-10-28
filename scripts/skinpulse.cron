@@ -1,7 +1,6 @@
 # Расписание сборщика CS2 Skin Pulse. vps-run.sh сам ставит этот файл в /etc/cron.d/skinpulse.
-# Суточный прогон пересобирает каталог (много памяти), поэтому на это время держит и лок рынка.
+# Рынок Skinport собирает GitHub Actions (.github/workflows/update.yml): с этого VPS Skinport не пускает (Cloudflare 403).
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-*/5 * * * *  root flock -n /run/skinpulse-market.lock /opt/skinpulse/app/scripts/vps-run.sh --market >> /var/log/skinpulse.log 2>&1
 */30 * * * * root flock -n /run/skinpulse.lock /opt/skinpulse/app/scripts/vps-run.sh >> /var/log/skinpulse.log 2>&1
-17 0 * * *   root flock -w 1800 /run/skinpulse.lock flock -w 600 /run/skinpulse-market.lock /opt/skinpulse/app/scripts/vps-run.sh --daily >> /var/log/skinpulse.log 2>&1
+17 0 * * *   root flock -w 1800 /run/skinpulse.lock /opt/skinpulse/app/scripts/vps-run.sh --daily >> /var/log/skinpulse.log 2>&1

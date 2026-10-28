@@ -1,9 +1,13 @@
 name: Deploy site
 
-# Цены собирает VPS (scripts/vps-run.sh): он кладёт состояние в ветку `data`
-# и вызывает этот workflow через repository_dispatch. Здесь только сборка и публикация сайта.
+# Цены Steam собирает VPS (scripts/vps-run.sh): он кладёт состояние в ветку `data`
+# и вызывает этот workflow через repository_dispatch.
+# Рынок Skinport (все предметы, топы) снимается здесь по расписанию каждые 5 минут:
+# с VPS Skinport не пускает. Его состояние лежит в отдельной ветке `market`.
 
 on:
+  schedule:
+    - cron: '*/5 * * * *'
   repository_dispatch:
     types: [state-updated]
   workflow_dispatch:
@@ -12,13 +16,13 @@ on:
     paths: ['site/**', 'scripts/update.mjs', '.github/workflows/**']
 
 permissions:
-  contents: read
+  contents: write # push в ветку market
   pages: write
   id-token: write
 
 concurrency:
   group: deploy
-  cancel-in-progress: true
+  cancel-in-progress: false # не обрывать снимок рынка на середине
 
 jobs:
   deploy:
@@ -37,6 +41,25 @@ jobs:
       - name: Restore state (ветка data)
         run: |
           git clone --depth 1 --branch data "https://github.com/${GITHUB_REPOSITORY}.git" state || mkdir -p state
+          git clone --depth 1 --branch market "https://github.com/${GITHUB_REPOSITORY}.git" market || mkdir -p market
+          rm -rf market/.git
+
+      - name: Snapshot Skinport
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          STATE_DIR: market
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/update.mjs --market
+          cd market
+          git init -q -b market
+          git add -A
+          git -c user.name=skin-pulse-bot -c user.email=skin-pulse-bot@users.noreply.github.com commit -qm "market $(date -u +%FT%TZ)"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" market
+          rm -rf .git
+
+      - name: Merge market state
+        run: cp market/*.json.gz state/ 2>/dev/null || true
 
       # картинки и типы наклеек, агентов, кейсов… — скачиваются раз в сутки
       - id: day
