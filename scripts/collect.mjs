@@ -67,9 +67,16 @@ const SOURCES = [
   {
     id: 'tm', name: 'Market.CSGO', live: true,
     async fetch() {
-      const j = await get('https://market.csgo.com/api/v2/prices/USD.json');
       const m = new Map();
-      for (const x of j.items || []) if (Number(x.volume) > 0) m.set(x.market_hash_name, { p: cents(x.price), q: Number(x.volume) });
+      try {
+        const j = await get('https://market.csgo.com/api/v2/prices/USD.json');
+        for (const x of j.items || []) if (Number(x.volume) > 0) m.set(x.market_hash_name, { p: cents(x.price), q: Number(x.volume) });
+      } catch (e) {
+        // с серверов GitHub площадка отвечает 403 — тогда берём её цены из суточной сводки csgotrader
+        log(`tm direct failed (${e.message}), using csgotrader`);
+        for (const [h, c] of Object.entries(await get(CSGOTRADER + 'csgotm.json'))) if (c) m.set(h, { p: cents(c), q: null });
+        this.live = false;
+      }
       return m;
     },
   },
