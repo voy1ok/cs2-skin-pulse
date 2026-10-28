@@ -16,7 +16,7 @@ if [ ! -d "$STATE" ]; then
 fi
 rm -rf "$STATE/.git"
 
-STATE_DIR="$STATE" OUT_DIR="$BASE/out" SOURCE=vps BUDGET_MIN="${BUDGET_MIN:-26}" STEAM_DELAY_MS="${STEAM_DELAY_MS:-2500}" \
+STATE_DIR="$STATE" OUT_DIR="$BASE/out" SOURCE=vps BUDGET_MIN="${BUDGET_MIN:-26}" STEAM_DELAY_MS="${STEAM_DELAY_MS:-4000}" \
   node --max-old-space-size=700 "$BASE/app/scripts/update.mjs" "$@"
 
 cd "$STATE"

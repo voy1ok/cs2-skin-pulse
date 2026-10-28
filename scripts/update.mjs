@@ -156,6 +156,10 @@ async function buildCatalog() {
 async function fetchSteam(hashes, prices, cursor) {
   const base = 'https://steamcommunity.com/market/search/render/?appid=730&norender=1&count=100&search_descriptions=0'
     + '&sort_column=name&sort_dir=asc&' + STEAM_TYPES.map((t) => `category_730_Type%5B%5D=${t}`).join('&');
+  if (cursor.cooldownUntil && Date.now() < cursor.cooldownUntil) {
+    log(`steam: пауза после 429 до ${new Date(cursor.cooldownUntil).toISOString()}`);
+    return 0;
+  }
   let start = cursor.start || 0;
   let fails = 0, pages = 0, got = 0, passDone = false;
   while (Date.now() - T0 < BUDGET && !passDone) {
@@ -178,6 +182,14 @@ async function fetchSteam(hashes, prices, cursor) {
       if (!data.results?.length && start < (data.total_count || 0)) throw new Error('empty page (soft rate limit)');
     } catch (e) {
       fails++;
+      if (/HTTP 429/.test(e.message)) {
+        // Steam ограничил IP: не долбим дальше, ждём (15 мин, затем дольше при повторах)
+        cursor.cooldowns = (cursor.cooldowns || 0) + 1;
+        cursor.cooldownUntil = Date.now() + Math.min(120, 15 * 2 ** (cursor.cooldowns - 1)) * 60_000;
+        cursor.errors = [...(cursor.errors || []), { at: Date.now(), start, msg: 'HTTP 429 → пауза' }].slice(-10);
+        log(`steam 429 на start=${start}, пауза до ${new Date(cursor.cooldownUntil).toISOString()}`);
+        break;
+      }
       cursor.errors = [...(cursor.errors || []), { at: Date.now(), start, msg: String(e.message).slice(0, 220) }].slice(-10);
       const wait = Math.min(240_000, 30_000 * 2 ** (fails - 1));
       log(`steam start=${start}: ${e.message}; retry in ${wait / 1000}s`);
@@ -185,7 +197,7 @@ async function fetchSteam(hashes, prices, cursor) {
       await sleep(wait);
       continue;
     }
-    fails = 0; pages++;
+    fails = 0; pages++; cursor.cooldowns = 0;
     const now = Date.now();
     for (const it of data.results) {
       if (!hashes.has(it.hash_name)) continue;
