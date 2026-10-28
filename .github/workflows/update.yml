@@ -38,8 +38,18 @@ jobs:
         run: |
           git clone --depth 1 --branch data "https://github.com/${GITHUB_REPOSITORY}.git" state || mkdir -p state
 
+      # картинки и типы наклеек, агентов, кейсов… — скачиваются раз в сутки
+      - id: day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: extras-${{ steps.day.outputs.day }}
+          restore-keys: extras-
+
       - name: Build site data
         env:
+          EXTRAS_CACHE: .cache/extras.json.gz
           STATE_DIR: state
           OUT_DIR: site/data
           BUILD: ${{ github.sha }}

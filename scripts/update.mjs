@@ -104,13 +104,10 @@ async function loadSource(name) {
 // ---------- catalog ----------
 async function buildCatalog() {
   log('building catalog…');
-  const [skins, flat, cols, crates] = await Promise.all(
-    ['skins.json', 'skins_not_grouped.json', 'collections.json', 'crates.json'].map(loadSource));
-  const operations = JSON.parse(fs.readFileSync(path.join(HERE, 'operations.json'), 'utf8'));
-
+  // файлы грузим по очереди, а самый большой (32 МБ) — первым и отдельно: на VPS мало памяти
   const variants = new Map();
   const seen = new Set();
-  for (const v of flat) {
+  for (const v of await loadSource('skins_not_grouped.json')) {
     const h = v.market_hash_name;
     if (!h || seen.has(h)) continue; // фазы Doppler делят один hash
     seen.add(h);
@@ -119,6 +116,10 @@ async function buildCatalog() {
     if (!variants.has(v.skin_id)) variants.set(v.skin_id, []);
     variants.get(v.skin_id).push([h, w, f]);
   }
+  const skins = await loadSource('skins.json');
+  const cols = await loadSource('collections.json');
+  const crates = await loadSource('crates.json');
+  const operations = JSON.parse(fs.readFileSync(path.join(HERE, 'operations.json'), 'utf8'));
 
   const rarities = {};
   const crateById = new Map(crates.map((c) => [c.id, c]));
@@ -163,21 +164,39 @@ async function buildCatalog() {
   }));
 
   log(`catalog: ${list.length} skins, ${seen.size} market items, ${collections.length} collections, ${cratesOut.length} crates`);
-  return { builtAt: NOW, skins: list, groups: { rarities, collections, crates: cratesOut, operations: ops }, extras: await buildExtras(crates) };
+  return { builtAt: NOW, skins: list, groups: { rarities, collections, crates: cratesOut, operations: ops } };
 }
 
-// остальные предметы рынка (наклейки, агенты, кейсы…): hash → [картинка, тип, цвет редкости]
+// остальные предметы рынка (наклейки, агенты, кейсы…): hash → [картинка, тип, цвет редкости].
+// Нужны только для оформления топов, поэтому собираются при сборке сайта, а не на VPS:
+// файлы большие (наклейки — 17 МБ), и маленькому серверу не хватает памяти.
 const EXTRA_SOURCES = {
   'stickers.json': 'stickers', 'agents.json': 'agents', 'graffiti.json': 'graffiti', 'music_kits.json': 'music',
   'patches.json': 'patches', 'keychains.json': 'charms', 'highlights.json': 'charms', 'keys.json': 'keys', 'collectibles.json': 'collectibles',
 };
-async function buildExtras(crates) {
+async function getExtras() {
+  if (process.env.SOURCE === 'vps') return {};
+  const cache = process.env.EXTRAS_CACHE; // файл кэша между сборками (GitHub Actions cache)
+  if (cache && fs.existsSync(cache)) {
+    try {
+      const c = JSON.parse(zlib.gunzipSync(fs.readFileSync(cache)));
+      if (Date.now() - c.at < DAY) return c.items;
+    } catch (e) { log('extras cache broken', e.message); }
+  }
+  const items = await buildExtras();
+  if (cache && Object.keys(items).length) {
+    fs.mkdirSync(path.dirname(cache), { recursive: true });
+    fs.writeFileSync(cache, zlib.gzipSync(JSON.stringify({ at: Date.now(), items })));
+  }
+  return items;
+}
+
+async function buildExtras() {
   const out = {};
   const add = (list, cat) => {
     for (const x of list) if (x.market_hash_name && !out[x.market_hash_name]) out[x.market_hash_name] = [x.image || '', cat, x.rarity?.color || ''];
   };
-  add(crates, 'cases');
-  for (const [file, cat] of Object.entries(EXTRA_SOURCES)) {
+  for (const [file, cat] of Object.entries({ 'crates.json': 'cases', ...EXTRA_SOURCES })) {
     try { add(await loadSource(file), cat); } catch (e) { log('extras', file, e.message); }
   }
   log(`extras: ${Object.keys(out).length} items`);
@@ -268,7 +287,7 @@ async function fetchSkinport() {
 }
 
 function mockMarket(catalog, market) {
-  const names = [...catalog.skins.flatMap((s) => s.v.map((v) => v[0])), ...Object.keys(catalog.extras || {})];
+  const names = catalog.skins.flatMap((s) => s.v.map((v) => v[0]));
   const out = {};
   for (const h of names) {
     const prev = market[h]?.[0] || Math.round(5 + Math.random() * 5000);
@@ -464,7 +483,7 @@ async function main() {
   log(`mode=${RENDER ? 'render' : MARKET ? 'market' : DAILY ? 'daily' : 'fast'}${MOCK ? ' (mock)' : ''} now=${new Date(NOW).toISOString()}`);
   if (MARKET) return runMarket(MOCK ? readState('catalog', null) : null); // каталог нужен только для mock
   let catalog = readState('catalog', null);
-  if (!catalog || (!RENDER && (DAILY || NOW - catalog.builtAt > 3 * DAY || !catalog.extras))) {
+  if (!catalog || (!RENDER && (DAILY || NOW - catalog.builtAt > 3 * DAY))) {
     try { catalog = await buildCatalog(); writeState('catalog', catalog); }
     catch (e) { if (!catalog) throw e; log('catalog refresh failed, using cached:', e.message); }
   }
@@ -554,7 +573,7 @@ async function main() {
   writeOut('catalog.json', { updatedAt: NOW, skins: skinsOut, groups: catalog.groups });
 
   // к позиции топа — картинка, тип и цвет редкости; скины ведут на свою страницу, остальное — на Skinport
-  const extras = catalog.extras || {};
+  const extras = await getExtras();
   const guessCat = (h) => (/^Sticker \|/.test(h) ? 'stickers' : /^Patch \|/.test(h) ? 'patches' : /^(Souvenir )?Charm \|/.test(h) ? 'charms'
     : /Graffiti \|/.test(h) ? 'graffiti' : /Music Kit \|/.test(h) ? 'music' : !h.includes('|') && /Case|Capsule|Package|Souvenir/.test(h) ? 'cases' : 'other');
   const decorate = (top) => top && {
