@@ -1,5 +1,7 @@
 # CS2 Spread
 
+**Сайт:** https://voy1ok.github.io/cs2-spread/
+
 Сайт, который сравнивает цены скинов CS2 в рублях на площадках, куда можно завести деньги из России, и считает выгоду перепродажи за вычетом комиссий: купить на одной площадке → продать на другой.
 
 | Площадка | Покупка | Продажа | Комиссия продажи (по умолчанию) | Откуда цены |
@@ -61,7 +63,7 @@ Steam без входа в аккаунт отдаёт 10 предметов з�
 Нужен fine-grained токен GitHub с доступом к этому репозиторию: Contents → Read and write.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/voy1ok/cs2-skin-pulse/main/scripts/vps-setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/voy1ok/cs2-spread/main/scripts/vps-setup.sh | bash
 ```
 
 Лог: `tail -f /var/log/cs2spread.log`.

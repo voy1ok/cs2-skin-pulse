@@ -14,6 +14,16 @@ if [ -z "${CS2SPREAD_PULLED:-}" ]; then
 fi
 
 echo "=== $(date '+%F %T') start"
+# репозиторий могли переименовать: GitHub отдаёт новое имя — запоминаем его (от него зависит адрес сайта)
+real=$(curl -fsS -m 20 -L -H "Authorization: Bearer ${GH_TOKEN}" "https://api.github.com/repos/${REPO}" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).full_name||"")}catch{}})' || true)
+if [ -n "$real" ] && [ "$real" != "$REPO" ]; then
+  sed -i "s|^REPO=.*|REPO=${real}|" /etc/cs2spread.env
+  echo "repo: ${REPO} → ${real}"
+  REPO=$real
+  REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+  git -C "$BASE/app" remote set-url origin "https://github.com/${REPO}.git"
+fi
 if ! cmp -s "$BASE/app/scripts/cs2spread.cron" /etc/cron.d/cs2spread; then
   install -m 644 "$BASE/app/scripts/cs2spread.cron" /etc/cron.d/cs2spread && echo "cron: расписание обновлено"
 fi

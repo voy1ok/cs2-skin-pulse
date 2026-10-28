@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Установка сборщика цен Steam на VPS (Ubuntu 22.04/24.04).
-#   curl -fsSL https://raw.githubusercontent.com/voy1ok/cs2-skin-pulse/main/scripts/vps-setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/voy1ok/cs2-spread/main/scripts/vps-setup.sh | bash
 set -euo pipefail
-REPO=${REPO:-voy1ok/cs2-skin-pulse}
+REPO=${REPO:-voy1ok/cs2-spread}
 BASE=/opt/cs2spread
 [ "$(id -u)" = 0 ] || { echo "Запусти от root"; exit 1; }
 
