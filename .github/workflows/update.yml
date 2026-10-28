@@ -1,6 +1,7 @@
 name: Update prices
 
 # Раз в 10 часов собирает цены с площадок (scripts/collect.mjs) и публикует сайт на GitHub Pages.
+# Цены Steam (и Market.CSGO — он не пускает серверы GitHub) собирает VPS и кладёт в ветку `steam`.
 # Расписание GitHub не умеет «каждые 10 часов», поэтому workflow просыпается каждый час
 # и работает, только если с прошлого обновления прошло ~10 часов.
 
@@ -62,8 +63,12 @@ jobs:
           key: refs-${{ steps.day.outputs.day }}
           restore-keys: refs-
 
+      - name: Steam prices from VPS (ветка steam)
+        run: git clone --depth 1 --branch steam "https://github.com/${GITHUB_REPOSITORY}.git" steam || mkdir -p steam
+
       - name: Collect prices
         env:
+          STEAM_DIR: steam
           OUT_DIR: site/data
           CACHE_DIR: .cache
           BUILD: ${{ github.sha }}

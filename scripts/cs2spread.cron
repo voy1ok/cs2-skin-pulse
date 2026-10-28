@@ -1,0 +1,4 @@
+# Расписание сборщика цен Steam на VPS. vps-run.sh сам ставит этот файл в /etc/cron.d/cs2spread.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/30 * * * * root flock -n /run/cs2spread.lock /opt/cs2spread/app/scripts/vps-run.sh >> /var/log/cs2spread.log 2>&1

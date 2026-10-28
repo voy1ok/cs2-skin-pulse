@@ -1,3 +1,4 @@
 site/data/
 .cache/
+steam/
 node_modules/

@@ -7,8 +7,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="CS2 Spread">
-  <title>CS2 Spread — разница цен скинов на площадках</title>
-  <meta name="description" content="Цены скинов CS2 на Skinport, Waxpeer, Market.CSGO, LIS-SKINS, Buff163, CSFloat и Youpin. Топ предметов, у которых цена на разных площадках различается сильнее всего.">
+  <title>CS2 Spread — где выгоднее купить и продать скин</title>
+  <meta name="description" content="Цены скинов CS2 в рублях на Steam, Market.CSGO и LIS-SKINS — площадках, которые можно пополнить из России. Выгода перепродажи за вычетом комиссий.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -19,17 +19,14 @@
   <header class="top">
     <div class="wrap top__in">
       <a class="logo" href="./"><svg class="logo__mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#38d6a0"/><path d="M8 22V10M24 22V14M16 22V6" stroke="#0c0e13" stroke-width="4" stroke-linecap="round"/></svg>CS2&nbsp;<b>Spread</b></a>
-      <div class="top__right">
-        <span id="status" class="status"></span>
-        <button id="cur" class="cur" type="button" title="Валюта">₽</button>
-      </div>
+      <span id="status" class="status"></span>
     </div>
   </header>
 
   <main class="wrap">
     <section class="intro">
-      <h1>Где один и тот же скин стоит по-разному</h1>
-      <p>Минимальные цены лотов на семи площадках и топ предметов с самой большой разницей. Купить там, где дешевле, — продать там, где дороже. Разница указана <b>до комиссий площадок</b>.</p>
+      <h1>Где купить скин дешевле и продать дороже</h1>
+      <p>Цены в рублях на площадках, которые можно пополнить из России. Для каждого предмета — самый выгодный маршрут «купить здесь → продать там» <b>за вычетом комиссий</b>.</p>
       <div id="sources" class="sources"></div>
     </section>
 
@@ -37,15 +34,22 @@
       <input id="q" class="search" type="search" placeholder="Поиск: AK-47 Redline, Kilowatt Case…" autocomplete="off">
       <div class="filters">
         <label>Тип <select id="cat"></select></label>
-        <label>Цена от <select id="minp"></select></label>
-        <label>Площадок от <select id="mins"></select></label>
+        <label>Цена покупки от <select id="minp"></select></label>
+        <label>Продавать <select id="sell">
+          <option value="all">куда угодно</option>
+          <option value="cash">только с выводом денег</option>
+        </select></label>
         <label>Сортировка <select id="sort">
-          <option value="pct">Разница, %</option>
-          <option value="abs">Разница, $</option>
-          <option value="order">Мгновенная продажа</option>
+          <option value="pct">Выгода, %</option>
+          <option value="rub">Выгода, ₽</option>
+          <option value="spread">Разница цен без комиссий</option>
         </select></label>
       </div>
-      <div id="sitebox" class="sitebox"></div>
+      <details class="fees" id="fees">
+        <summary>Комиссии в расчёте <span id="feesum"></span></summary>
+        <div id="feebox" class="feebox"></div>
+        <p class="fees__note">Комиссии продажи — по правилам площадок. Пополнение и вывод зависят от способа оплаты, поставьте свои. Сохраняется в этом браузере.</p>
+      </details>
     </section>
 
     <section>
@@ -55,8 +59,8 @@
     </section>
 
     <footer class="foot">
-      <p>Цены обновляются раз в 10 часов. У площадок с пометкой «live» они снимаются прямо с площадки, у остальных берутся из сводки <a href="https://csgotrader.app" target="_blank" rel="noopener">csgotrader.app</a>, которая обновляется раз в сутки. Картинки — <a href="https://github.com/ByMykel/CSGO-API" target="_blank" rel="noopener">ByMykel/CSGO-API</a>.</p>
-      <p>Цены отличаются не только из-за рынка: на площадках разные комиссии, сроки вывода и блокировки обмена. Ножи с фазами Doppler не сравниваются — у всех фаз одно название. Не является инвестиционной рекомендацией.</p>
+      <p><b>Важно.</b> Предмет, купленный на Steam Market или полученный обменом, обычно нельзя передать или продать дальше 7 дней — за это время цена может уйти. Деньги, вырученные в Steam, остаются в кошельке Steam: вывести их нельзя.</p>
+      <p>Цены обновляются раз в 10 часов. Steam и Market.CSGO собирает отдельный сервер; LIS-SKINS отдаёт цены в долларах — они пересчитаны по курсу ЦБ. Продать на LIS-SKINS можно только по их цене выкупа, а её в открытых данных нет, поэтому LIS-SKINS здесь — только для покупки. Ножи с фазами Doppler не сравниваются: у всех фаз одно название. Картинки — <a href="https://github.com/ByMykel/CSGO-API" target="_blank" rel="noopener">ByMykel/CSGO-API</a>. Не является инвестиционной рекомендацией.</p>
     </footer>
   </main>
   <script src="app.js"></script>
