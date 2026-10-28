@@ -15,7 +15,9 @@
     steam: { sell: true, cash: false, fee: { sell: 13.04, dep: 0, out: 0 }, note: 'покупатель платит +15% к сумме продавца' },
     tm: { sell: true, cash: true, fee: { sell: 5, dep: 0, out: 0 }, note: 'комиссия продавца 5%' },
     lis: { sell: false, cash: true, fee: { sell: 0, dep: 0, out: 0 }, note: 'только покупка; цены в $ — проверьте курс на их сайте' },
+    csmoney: { sell: true, cash: true, fee: { sell: 5, dep: 0, out: 0 }, note: 'комиссия продавца 5%; цены в $ из сводки за сутки, без числа лотов' },
   };
+  const USD_SITES = ['lis', 'csmoney']; // цены в долларах — курс можно поставить свой
   const MIN_LOTS = 2;     // если на площадке меньше лотов, её цену не берём
   const SUSPICIOUS = 1.8; // продажа дороже покупки больше чем в 1,8 раза — почти всегда ошибка в данных или случайный лот
   // цена лота сильно ниже (или продажи — выше) медианы реальных сделок за месяц — тоже ошибка или лот с подвохом
@@ -29,6 +31,7 @@
     steam: (h) => `https://steamcommunity.com/market/listings/730/${enc(h)}`,
     tm: (h) => `https://market.csgo.com/ru/?search=${enc(h)}`,
     lis: (h, s) => `https://lis-skins.com/ru/market/csgo/${s || slugify(h)}/`,
+    csmoney: (h) => `https://cs.money/ru/market/buy/?search=${enc(h)}`,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -40,10 +43,11 @@
 
   const D = { meta: null, sources: [], items: [], images: null, rows: [], shown: PAGE, open: new Set() };
   const ui = {
-    q: '', cat: store.get('cat', 'all'), minp: store.get('minp', 10000), sell: store.get('sell', 'all'), sort: store.get('sort2', 'best'),
+    q: '', cat: store.get('cat', 'all'), minp: store.get('minp', 10000), buyOff: new Set(store.get('buyOff', [])), sellOff: new Set(store.get('sellOff', [])), sort: store.get('sort2', 'best'),
     mins: store.get('mins', 0),
     fees: Object.fromEntries(Object.entries(SITE).map(([id, s]) => [id, { ...s.fee, ...store.get('fee.' + id, {}) }])),
-    lisRate: store.get('rate.lis', 0), // свой курс LIS-SKINS, ₽ за $ (0 — как в данных)
+    // свой курс для площадок с ценами в долларах, ₽ за $ (0 — как в данных)
+    rates: Object.fromEntries(USD_SITES.map((id) => [id, store.get('rate.' + id, 0)])),
   };
 
   const rub = (k, sign = false) => {
@@ -104,10 +108,10 @@
     let best = null;
     const routes = [];
     ok.forEach((b, i) => {
-      if (!b) return;
+      if (!b || ui.buyOff.has(sid(i))) return;
       ok.forEach((s, j) => {
         const site = SITE[sid(j)];
-        if (!s || i === j || !site?.sell || (ui.sell === 'cash' && !site.cash) || s > b * SUSPICIOUS) return;
+        if (!s || i === j || !site?.sell || ui.sellOff.has(sid(j)) || s > b * SUSPICIOUS) return;
         if (ref && (b < ref * REF_LOW || s > ref * REF_HIGH)) return;
         const buy = cost(i, b), get = proceeds(j, s);
         const r = { i, j, b, s, buy, get, profit: get - buy, pct: (get - buy) / buy };
@@ -126,7 +130,7 @@
   }
 
   function recompute() {
-    D.scale = D.sources.map((s) => (s.id === 'lis' && ui.lisRate && s.rate ? ui.lisRate / s.rate : 1));
+    D.scale = D.sources.map((s) => (ui.rates[s.id] && s.rate ? ui.rates[s.id] / s.rate : 1));
     const q = ui.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const rows = [];
     D.items.forEach((it, i) => {
@@ -149,8 +153,12 @@
   function renderSources() {
     $('sources').innerHTML = D.sources.map((s) => `
       <span class="src ${s.error ? 'src--err' : ''}" title="${esc(s.error ? 'Нет данных: ' + s.error : `${num(s.count)} предметов, ${s.via || ''}`)}">
-        <i></i>${esc(s.name)}<small>${s.error ? 'нет данных' : `${num(s.count)} · ${esc(ago(s.at))}`}</small>
+        <i></i>${esc(s.name)}<small>${s.error ? esc(s.error) : `${num(s.count)} · ${esc(ago(s.at))}`}</small>
       </span>`).join('');
+    const chk = (kind, off, list) => list.map((s) => `<label class="chk"><input type="checkbox" data-${kind}="${s.id}" ${off.has(s.id) ? '' : 'checked'} ${s.error ? 'disabled' : ''}>${esc(s.name)}</label>`).join('');
+    $('routes').innerHTML = `<div><span class="routes__label">Покупать на:</span>${chk('buy', ui.buyOff, D.sources)}</div>
+      <div><span class="routes__label">Продавать на:</span>${chk('sell', ui.sellOff, D.sources.filter((s) => SITE[s.id]?.sell))}
+      <small>Steam — деньги остаются в кошельке</small></div>`;
   }
 
   function renderStatus() {
@@ -166,8 +174,8 @@
     $('feebox').innerHTML = D.sources.map((s) => {
       const site = SITE[s.id];
       if (!site) return '';
-      const rate = s.id === 'lis' && s.rate ? `<label class="fee">курс ₽/$
-        <span><input type="number" min="50" max="200" step="0.01" inputmode="decimal" data-rate="lis" value="${ui.lisRate || s.rate}"></span></label>` : '';
+      const rate = USD_SITES.includes(s.id) && s.rate ? `<label class="fee">курс ₽/$
+        <span><input type="number" min="50" max="200" step="0.01" inputmode="decimal" data-rate="${s.id}" value="${ui.rates[s.id] || s.rate}"></span></label>` : '';
       return `<div class="feerow"><b>${esc(s.name)}</b><small>${esc(site.note)}</small>
         ${field(s.id, 'dep', 'пополнение')}${field(s.id, 'sell', 'продажа', site.sell)}${field(s.id, 'out', 'вывод', site.sell && site.cash)}${rate}</div>`;
     }).join('');
@@ -218,6 +226,7 @@
       `<li>${esc(sname(x.i))} → ${esc(sname(x.j))}: <b class="${x.profit > 0 ? 'up' : 'down'}">${rub(x.profit, true)} (${pct(x.pct)})</b></li>`).join('');
     return `<div class="detail">${calc}<div class="sites">${sites}</div>
       ${others ? `<p class="detail__sub">Другие маршруты</p><ul class="alt">${others}</ul>` : ''}
+      ${sid(b.i) === 'csmoney' || sid(b.j) === 'csmoney' ? '<p class="detail__warn">Цена CS.MONEY — из сводки за сутки и без числа лотов. Проверьте её на сайте CS.MONEY перед сделкой.</p>' : ''}
       <p class="detail__note">Цены — минимальные лоты. Продаёте по цене самого дешёвого лота на площадке продажи; на практике нужно выставить чуть ниже.</p></div>`;
   }
 
@@ -239,23 +248,29 @@
     fill($('cat'), Object.entries(CAT).filter(([k]) => k === 'all' || cats.has(k)), ui.cat);
     fill($('minp'), MIN_PRICE, ui.minp);
     fill($('mins'), MIN_SALES, ui.mins);
-    $('sell').value = ui.sell;
     $('sort').value = ui.sort;
 
     let t;
     $('q').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { ui.q = e.target.value; recompute(); }, 150); });
     $('cat').onchange = (e) => { ui.cat = e.target.value; store.set('cat', ui.cat); recompute(); };
     $('minp').onchange = (e) => { ui.minp = +e.target.value; store.set('minp', ui.minp); recompute(); };
-    $('sell').onchange = (e) => { ui.sell = e.target.value; store.set('sell', ui.sell); recompute(); };
+    $('routes').onchange = (e) => {
+      const { buy, sell } = e.target.dataset;
+      const [set, key, id] = buy ? [ui.buyOff, 'buyOff', buy] : [ui.sellOff, 'sellOff', sell];
+      if (!id) return;
+      if (e.target.checked) set.delete(id); else set.add(id);
+      store.set(key, [...set]); recompute();
+    };
     $('sort').onchange = (e) => { ui.sort = e.target.value; store.set('sort2', ui.sort); recompute(); };
     $('mins').onchange = (e) => { ui.mins = +e.target.value; store.set('mins', ui.mins); recompute(); };
     let ft;
     $('feebox').addEventListener('input', (e) => {
       if (e.target.dataset.rate) {
         const v = parseFloat(String(e.target.value).replace(',', '.')) || 0;
-        const def = D.sources.find((s) => s.id === 'lis')?.rate;
-        ui.lisRate = v >= 50 && v <= 200 && v !== def ? v : 0;
-        store.set('rate.lis', ui.lisRate);
+        const id = e.target.dataset.rate;
+        const def = D.sources.find((s) => s.id === id)?.rate;
+        ui.rates[id] = v >= 50 && v <= 200 && v !== def ? v : 0;
+        store.set('rate.' + id, ui.rates[id]);
         clearTimeout(ft); ft = setTimeout(recompute, 250);
         return;
       }

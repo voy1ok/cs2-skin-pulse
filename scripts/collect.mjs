@@ -23,7 +23,7 @@ const STEAM_MAX_AGE = 36 * H; // цену Steam старше полутора с
 const VOLUME_MAX_AGE = 3 * DAY; // продажи Steam за сутки — считаем актуальными 3 дня
 const CANDIDATES = 1500;        // сколько самых выгодных предметов отдаём VPS, чтобы он узнал их продажи в Steam
 // комиссии продажи по умолчанию — те же, что на сайте (site/app.js, SITE)
-const SELL_KEEP = { steam: 1 - 0.1304, tm: 0.95 };
+const SELL_KEEP = { steam: 1 - 0.1304, tm: 0.95, csmoney: 0.95 };
 const BYMYKEL = 'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/';
 const CSGOTRADER = 'https://prices.csgotrader.app/latest/';
 const STEAM_IMG = 'https://community.akamai.steamstatic.com/economy/image/';
@@ -128,10 +128,8 @@ const SOURCES = [
   {
     id: 'lis', name: 'LIS-SKINS',
     async fetch({ rate, tmRate }) {
-      // LIS-SKINS отдаёт цены только в долларах. Свой курс рубля площадка не публикует, а у рублёвых площадок
-      // он выше ЦБ (Market.CSGO — около +3%), поэтому берём больший из курсов ЦБ и Market.CSGO: так выгода
-      // покупки на LIS-SKINS скорее занижена, чем завышена. Точный курс можно поставить на сайте.
-      const usdRub = Math.max(rate.usdRub, tmRate || 0);
+      // LIS-SKINS отдаёт цены только в долларах
+      const usdRub = usdRubFor(rate, tmRate);
       const list = await get('https://lis-skins.com/market_export_json/csgo.json');
       const m = new Map();
       for (const x of list) {
@@ -141,11 +139,31 @@ const SOURCES = [
         m.set(x.name, { p: kop(usd * usdRub), q: x.count, slug: String(x.url || '').replace(/^.*\/market\/csgo\/|\/$/g, '') });
       }
       this.rate = usdRub;
-      this.via = `в долларах, курс ${usdRub.toFixed(2)} ₽/$ (${usdRub > rate.usdRub ? 'как у Market.CSGO' : rate.src})`; this.at = Date.now();
+      this.via = `в долларах, ${rateNote(usdRub, rate)}`; this.at = Date.now();
+      return m;
+    },
+  },
+  {
+    id: 'csmoney', name: 'CS.MONEY',
+    async fetch({ rate, tmRate }) {
+      // API маркета CS.MONEY закрыт проверкой Cloudflare — берём минимальные цены из суточной сводки csgotrader.app.
+      // Числа лотов в ней нет; по сравнению с другими площадками это цены маркета, а не обменника.
+      const usdRub = usdRubFor(rate, tmRate);
+      const j = await get(CSGOTRADER + 'csmoney.json');
+      const m = new Map();
+      for (const [h, x] of Object.entries(j)) { const c = kop((x?.price || 0) * usdRub); if (c) m.set(h, { p: c, q: 0 }); }
+      this.rate = usdRub;
+      this.via = `сводка csgotrader.app за сутки, ${rateNote(usdRub, rate)}`; this.at = Date.now();
       return m;
     },
   },
 ];
+
+// для LIS-SKINS и CS.MONEY: цены в долларах, свой курс рубля площадки не публикуют. У рублёвых площадок он
+// выше ЦБ (Market.CSGO — около +4%), поэтому берём больший из курсов ЦБ и Market.CSGO: так выгода покупки
+// там скорее занижена, чем завышена. Точный курс можно поставить на сайте.
+function usdRubFor(rate, tmRate) { return Math.max(rate.usdRub, tmRate || 0); }
+function rateNote(r, rate) { return `курс ${r.toFixed(2)} ₽/$ (${r > rate.usdRub ? 'как у Market.CSGO' : rate.src})`; }
 
 // курс, по которому Market.CSGO переводит доллары в рубли: медиана отношения его рублёвых и долларовых цен
 async function impliedRate(rubMap) {
@@ -253,10 +271,10 @@ async function main() {
       return new Map();
     }
   };
-  const [steam, tm, lis] = SOURCES;
-  // LIS-SKINS пересчитывается по курсу Market.CSGO — поэтому после него
+  const [steam, tm, ...usd] = SOURCES;
+  // LIS-SKINS и CS.MONEY пересчитываются по курсу Market.CSGO — поэтому после него
   const [steamRes, tmRes] = await Promise.all([run(steam, { rate }), run(tm, { rate })]);
-  const results = [steamRes, tmRes, await run(lis, { rate, tmRate: tm.rate })];
+  const results = [steamRes, tmRes, ...await Promise.all(usd.map((s) => run(s, { rate, tmRate: tm.rate })))];
   if (results.filter((m) => m.size).length < 2) throw new Error('меньше двух площадок ответили — данные не обновляю');
 
   const names = new Set();

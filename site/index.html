@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="CS2 Spread">
   <title>CS2 Spread — где выгоднее купить и продать скин</title>
-  <meta name="description" content="Цены скинов CS2 в рублях на Steam, Market.CSGO и LIS-SKINS — площадках, которые можно пополнить из России. Выгода перепродажи за вычетом комиссий.">
+  <meta name="description" content="Цены скинов CS2 в рублях на Steam, Market.CSGO, LIS-SKINS и CS.MONEY — площадках, которые можно пополнить из России. Выгода перепродажи за вычетом комиссий.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -35,10 +35,6 @@
       <div class="filters">
         <label>Тип <select id="cat"></select></label>
         <label>Цена покупки от <select id="minp"></select></label>
-        <label>Продавать <select id="sell">
-          <option value="all">куда угодно</option>
-          <option value="cash">только с выводом денег</option>
-        </select></label>
         <label>Продажи в Steam <select id="mins"></select></label>
         <label>Сортировка <select id="sort">
           <option value="best">Лучшие: выгода × продажи</option>
@@ -48,6 +44,7 @@
           <option value="spread">Разница цен без комиссий</option>
         </select></label>
       </div>
+      <div class="routes" id="routes"></div>
       <details class="fees" id="fees">
         <summary>Комиссии в расчёте <span id="feesum"></span></summary>
         <div id="feebox" class="feebox"></div>
@@ -63,7 +60,7 @@
 
     <footer class="foot">
       <p><b>Важно.</b> Предмет, купленный на Steam Market или полученный обменом, обычно нельзя передать или продать дальше 7 дней — за это время цена может уйти. Деньги, вырученные в Steam, остаются в кошельке Steam: вывести их нельзя.</p>
-      <p>Цены обновляются раз в 10 часов. Steam и Market.CSGO собирает отдельный сервер; LIS-SKINS отдаёт цены в долларах — они пересчитаны по курсу Market.CSGO, но не ниже ЦБ (свой курс можно поставить в комиссиях). Продать на LIS-SKINS можно только по их цене выкупа, а её в открытых данных нет, поэтому LIS-SKINS здесь — только для покупки. Продажи — сколько штук продали за сутки в Steam; если этих данных ещё нет — сколько продали на Skinport (там торговать из России нельзя, но спрос он показывает). В «Лучших» выгода в рублях умножается на квадрат доли от 20 продаж в сутки: ходовой предмет с выгодой 300 ₽ стоит выше, чем редкий с выгодой 3 000 ₽. Цены, которые сильно расходятся с реальными сделками за месяц, в расчёт не идут. Ножи с фазами Doppler не сравниваются: у всех фаз одно название. Картинки — <a href="https://github.com/ByMykel/CSGO-API" target="_blank" rel="noopener">ByMykel/CSGO-API</a>. Не является инвестиционной рекомендацией.</p>
+      <p>Цены обновляются раз в 10 часов. Steam и Market.CSGO собирает отдельный сервер; LIS-SKINS отдаёт цены в долларах — они пересчитаны по курсу Market.CSGO, но не ниже ЦБ (свой курс можно поставить в комиссиях). Продать на LIS-SKINS можно только по их цене выкупа, а её в открытых данных нет, поэтому LIS-SKINS здесь — только для покупки. Цены CS.MONEY — сводка csgotrader.app за сутки в долларах, без числа лотов (API маркета закрыт): перед продажей туда проверьте цену на сайте. Продажи — сколько штук продали за сутки в Steam; если этих данных ещё нет — сколько продали на Skinport (там торговать из России нельзя, но спрос он показывает). В «Лучших» выгода в рублях умножается на квадрат доли от 20 продаж в сутки: ходовой предмет с выгодой 300 ₽ стоит выше, чем редкий с выгодой 3 000 ₽. Цены, которые сильно расходятся с реальными сделками за месяц, в расчёт не идут. Ножи с фазами Doppler не сравниваются: у всех фаз одно название. Картинки — <a href="https://github.com/ByMykel/CSGO-API" target="_blank" rel="noopener">ByMykel/CSGO-API</a>. Не является инвестиционной рекомендацией.</p>
     </footer>
   </main>
   <script src="app.js"></script>

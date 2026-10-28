@@ -55,6 +55,12 @@ img { display: block; }
 .filters { display: flex; flex-wrap: wrap; gap: 10px; }
 .filters label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .filters select { height: 36px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.routes { display: grid; gap: 6px; font-size: 13px; }
+.routes > div { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.routes__label { color: var(--muted); min-width: 110px; }
+.routes small { color: var(--dim); font-size: 11px; }
+.chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.chk input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
 .fees { font-size: 13px; }
 .fees summary { cursor: pointer; color: var(--muted); width: fit-content; }
 .fees summary span { color: var(--dim); }
@@ -114,6 +120,7 @@ img { display: block; }
 .site.lo { box-shadow: inset 3px 0 var(--lo); }
 .site.hi { box-shadow: inset 3px 0 var(--hi); }
 .site.off { opacity: .5; }
+.detail__warn { margin: 0 2px; color: #f2c14e; font-size: 12px; }
 .detail__note { margin: 0 2px; color: var(--dim); font-size: 12px; }
 
 .more { display: block; margin: 16px auto 0; height: 44px; padding: 0 22px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); cursor: pointer; font-weight: 600; }
