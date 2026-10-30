@@ -23,6 +23,7 @@
     csfloat: { sell: true, cash: true, fee: { sell: 2, dep: 0, out: 0 }, note: 'комиссия продавца 2%, вывод 0,5–2,5%; сводка за сутки' },
     youpin: { sell: true, cash: true, fee: { sell: 1, dep: 0, out: 0 }, note: 'комиссия продавца около 1%; цены сводки в среднем на 7% выше реальных сделок — продажа туда по умолчанию выключена' },
   };
+  const TIERS = [15, 50, 500, 0]; // ценовые категории по цене покупки, $ (0 — все цены)
   const USD_SITES = ['lis', 'csmoney']; // цены в долларах — курс можно поставить свой
   const MIN_LOTS = 2;     // если на площадке меньше лотов, её цену не берём
   const SUSPICIOUS = 1.8; // продажа дороже покупки больше чем в 1,8 раза — почти всегда ошибка в данных или случайный лот
@@ -57,7 +58,7 @@
     q: '', cat: store.get('cat', 'all'), minp: store.get('minp', 10000), buyOff: new Set(store.get('buyOff', [])), sellOff: new Set(store.get('sellOff2', ['youpin'])), sort: store.get('sort2', 'best'),
     mins: store.get('mins', 0),
     region: store.get('region', 'ru'), // ru — только площадки, которые можно пополнить из России; all — все
-    tier: store.get('tier', 0),        // потолок цены покупки в долларах (0 — без потолка)
+    tier: TIERS.includes(store.get('tier', 0)) ? store.get('tier', 0) : 0, // потолок цены покупки в долларах (0 — без потолка)
     fees: Object.fromEntries(Object.entries(SITE).map(([id, s]) => [id, { ...s.fee, ...store.get('fee.' + id, {}) }])),
     // свой курс для площадок с ценами в долларах, ₽ за $ (0 — как в данных)
     rates: Object.fromEntries(USD_SITES.map((id) => [id, store.get('rate.' + id, 0)])),
@@ -263,8 +264,8 @@
     const seg = (el, opts, val) => { el.innerHTML = opts.map(([v, t]) => `<button type="button" data-v="${v}" class="${String(v) === String(val) ? 'on' : ''}">${t}</button>`).join(''); };
     seg($('region'), [['ru', 'Только РФ'], ['all', 'Все площадки']], ui.region);
     const r = usdRub();
-    const k = (usd) => `<small>≈${num(Math.round((usd * r) / 1000))} тыс. ₽</small>`;
-    seg($('tier'), [[0, 'Все цены'], [50, `до $50${k(50)}`], [100, `до $100${k(100)}`], [500, `до $500${k(500)}`]], ui.tier);
+    const k = (usd) => { const v = usd * r; return `<small>≈${v < 10000 ? num(Math.round(v / 100) * 100) + ' ₽' : num(Math.round(v / 1000)) + ' тыс. ₽'}</small>`; };
+    seg($('tier'), TIERS.map((t) => (t ? [t, `до $${t}${k(t)}`] : [0, 'Все цены'])), ui.tier);
   }
 
   function bind() {
