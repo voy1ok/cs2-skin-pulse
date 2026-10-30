@@ -332,9 +332,18 @@
   }
 
   // ---------- загрузка ----------
+  // браузер или приложение с главного экрана могли открыть страницу из кэша, а на сайте уже новая версия —
+  // тогда один раз перезагружаемся по новому адресу мимо кэша
+  function outdated(m) {
+    if (!BUILD || !m?.build || m.build.startsWith(BUILD) || location.search.includes('b=' + m.build.slice(0, 8))) return false;
+    location.replace(location.pathname + '?b=' + m.build.slice(0, 8));
+    return true;
+  }
+
   async function boot() {
     try {
       const [meta, data] = await Promise.all([getJSON('data/meta.json'), getJSON('data/items.json')]);
+      if (outdated(meta)) return;
       Object.assign(D, { meta, sources: data.sources, items: data.items });
       renderStatus(); renderSources(); renderFees(); bind(); recompute();
       // картинки — после того как список уже виден
@@ -352,10 +361,7 @@
     if (document.hidden || !D.meta) return;
     try {
       const m = await getJSON('data/meta.json');
-      if (BUILD && m.build && !m.build.startsWith(BUILD) && !location.search.includes('b=' + m.build.slice(0, 8))) {
-        location.replace(location.pathname + '?b=' + m.build.slice(0, 8));
-        return;
-      }
+      if (outdated(m)) return;
       if (m.updatedAt !== D.meta.updatedAt) {
         const data = await getJSON('data/items.json');
         Object.assign(D, { meta: m, sources: data.sources, items: data.items, images: null });
